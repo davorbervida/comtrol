@@ -25,6 +25,8 @@ Item {
   property int sliceHeight: 432
   property int sliceSpacing: -30
   property int skewOffset: 28
+  // Same vertical budget as the name under the carousel (display + margins).
+  readonly property int topChromeHeight: mode === "local" ? 74 : Style.space(30)
   readonly property int bottomChromeHeight: filterText ? 104 : 74
 
   signal backRequested()
@@ -124,6 +126,19 @@ Item {
     return labelForName(imageArray[root.selectedIndex].name)
   }
 
+  function currentSourceLabel() {
+    if (root.mode !== "local")
+      return ""
+    if (imageArray.length === 0 || !itemMatches(root.selectedIndex))
+      return ""
+    var src = String(imageArray[root.selectedIndex].source || "").toLowerCase()
+    if (src === "user")
+      return "User"
+    if (src === "first_party")
+      return "System"
+    return ""
+  }
+
   function select(index) {
     if (imageArray.length === 0)
       return
@@ -202,7 +217,7 @@ Item {
     id: card
     visible: root.layoutSettled && imageArray.length > 0
     width: Math.min(parent.width - 80, root.expandedWidth + 13 * (root.sliceWidth + root.sliceSpacing) + 40)
-    height: root.expandedHeight + Style.space(30) + root.bottomChromeHeight
+    height: root.expandedHeight + root.topChromeHeight + root.bottomChromeHeight
     anchors.centerIn: parent
 
     MouseArea { anchors.fill: parent; onClicked: {} }
@@ -210,7 +225,7 @@ Item {
     Item {
       id: carousel
       anchors.top: parent.top
-      anchors.topMargin: Style.space(30)
+      anchors.topMargin: root.topChromeHeight
       anchors.bottom: parent.bottom
       anchors.bottomMargin: root.bottomChromeHeight
       anchors.horizontalCenter: parent.horizontalCenter
@@ -353,6 +368,23 @@ Item {
           }
         }
       }
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      visible: root.mode === "local" && text.length > 0
+      anchors.bottom: carousel.top
+      anchors.bottomMargin: Style.space(16)
+      anchors.horizontalCenter: carousel.horizontalCenter
+      width: root.expandedWidth
+      text: root.currentSourceLabel()
+      color: root.foreground
+      style: Text.Outline
+      styleColor: Util.alpha(root.dimColor, 0.7)
+      font.pixelSize: Style.font.display
+      font.weight: Font.DemiBold
+      horizontalAlignment: Text.AlignHCenter
+      elide: Text.ElideRight
     }
 
     Text {

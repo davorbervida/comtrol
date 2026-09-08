@@ -60,10 +60,15 @@ Item {
     "root": {
       title: "Control",
       rows: [
-        { itemId: "themes", label: "Themes", icon: "󰏘", kind: "menu" },
-        { itemId: "plugins", label: "Plugins", icon: "󰐱", kind: "menu" },
-        { itemId: "packages", label: "Packages", icon: "󰏖", kind: "menu" },
-        { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "menu" }
+        { itemId: "appearance", label: "Appearance", icon: "", kind: "menu" },
+        { itemId: "apps", label: "Apps", icon: "󰀻", kind: "menu" },
+        { itemId: "plugins", label: "Plugins", icon: "󰐱", kind: "menu" }
+      ]
+    },
+    "appearance": {
+      title: "Appearance",
+      rows: [
+        { itemId: "themes", label: "Themes", icon: "󰏘", kind: "menu" }
       ]
     },
     "themes": {
@@ -71,6 +76,13 @@ Item {
       rows: [
         { itemId: "themes.local", label: "Installed", icon: "󰉋", kind: "action", domain: "themes", mode: "local" },
         { itemId: "themes.web", label: "Browse", icon: "󰖟", kind: "action", domain: "themes", mode: "web" }
+      ]
+    },
+    "apps": {
+      title: "Apps",
+      rows: [
+        { itemId: "packages", label: "Packages", icon: "󰏖", kind: "menu" },
+        { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "menu" }
       ]
     },
     "plugins": {
