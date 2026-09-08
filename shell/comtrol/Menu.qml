@@ -26,6 +26,7 @@ Item {
   property var resultRows: []
   property var themeResults: []
   property var pluginResults: []
+  property var backgroundResults: []
   property var selectedPlugin: null
   property var installedPluginIds: ({})
   property string pendingDomain: ""
@@ -37,6 +38,9 @@ Item {
     && !loading
     && pendingDomain === "themes"
     && (pendingMode === "local" || pendingMode === "web")
+  readonly property bool usePreviewBackground: showingResults
+    && !loading
+    && pendingDomain === "background"
   readonly property bool usePluginDetail: showingResults
     && !loading
     && pendingDomain === "plugins"
@@ -47,7 +51,7 @@ Item {
     && pendingDomain === "plugins"
     && pendingMode === "web"
     && selectedPlugin === null
-  readonly property bool useFullscreenLayout: usePreviewTheme || useBrowsePlugins || usePluginDetail
+  readonly property bool useFullscreenLayout: usePreviewTheme || useBrowsePlugins || usePluginDetail || usePreviewBackground
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -101,27 +105,11 @@ Item {
     "background": {
       title: "Backgrounds",
       rows: [
-        { itemId: "background.theme", label: "Theme", icon: "󰏘", kind: "menu" },
-        { itemId: "background.themes", label: "All themes", icon: "󰕰", kind: "menu" },
-        { itemId: "background.wallpapers", label: "My wallpapers", icon: "󰋩", kind: "menu" },
-        { itemId: "background.all", label: "All wallpapers", icon: "󰸉", kind: "menu" }
+        { itemId: "background.theme", label: "Theme", icon: "󰏘", kind: "action", domain: "background", mode: "current" },
+        { itemId: "background.themes", label: "All themes", icon: "󰕰", kind: "action", domain: "background", mode: "themes" },
+        { itemId: "background.wallpapers", label: "My wallpapers", icon: "󰋩", kind: "action", domain: "background", mode: "wallpapers" },
+        { itemId: "background.all", label: "All wallpapers", icon: "󰸉", kind: "action", domain: "background", mode: "all" }
       ]
-    },
-    "background.theme": {
-      title: "Theme",
-      rows: []
-    },
-    "background.themes": {
-      title: "All themes",
-      rows: []
-    },
-    "background.wallpapers": {
-      title: "My wallpapers",
-      rows: []
-    },
-    "background.all": {
-      title: "All wallpapers",
-      rows: []
     },
     "apps": {
       title: "Apps",
@@ -174,6 +162,8 @@ Item {
       case "aurs": return "-aur"
       case "bindings": return "-binding"
       case "webapps": return "-webapp"
+      case "background":
+      case "backgrounds": return "-background"
       default: return "-" + String(domain || "").replace(/s$/, "")
     }
   }
@@ -279,6 +269,7 @@ Item {
     root.resultRows = []
     root.themeResults = []
     root.pluginResults = []
+    root.backgroundResults = []
     root.selectedPlugin = null
     root.installedPluginIds = ({})
     root.filterText = ""
@@ -418,6 +409,7 @@ Item {
       root.resultRows = []
       root.themeResults = []
       root.pluginResults = []
+      root.backgroundResults = []
       root.selectedPlugin = null
       root.installedPluginIds = ({})
       root.filterText = ""
@@ -465,6 +457,7 @@ Item {
     root.resultRows = []
     root.themeResults = []
     root.pluginResults = []
+    root.backgroundResults = []
     root.selectedPlugin = null
     root.installedPluginIds = ({})
     root.filterText = ""
@@ -473,11 +466,14 @@ Item {
     rustSearchTimer.stop()
     root.rebuildDisplay()
 
-    // Installed → system view (-v); Add → search web (-s -w)
+    // Installed → system view (-v); Add → search web (-s -w);
+    // Background → system view with source (-v -background -current|…)
     root.searchSerial += 1
     searchProcess.serial = root.searchSerial
     var argv
-    if (mode === "local")
+    if (domain === "background")
+      argv = [root.runScript(), "-v", "-background", "-" + String(mode || "current")]
+    else if (mode === "local")
       argv = [root.runScript(), "-v", root.domainFlag(domain)]
     else
       argv = [root.runScript(), "-s", root.domainFlag(domain), "-w"]
@@ -521,6 +517,22 @@ Item {
         }
         root.themeResults = themes
         root.pluginResults = []
+        root.backgroundResults = []
+        return rows
+      }
+
+      if (root.pendingDomain === "background") {
+        var backgrounds = []
+        for (var b = 0; b < data.length; b++) {
+          var bg = data[b] || {}
+          var path = root.jsonField(bg, "path")
+          if (!path)
+            continue
+          backgrounds.push({ path: path })
+        }
+        root.backgroundResults = backgrounds
+        root.themeResults = []
+        root.pluginResults = []
         return rows
       }
 
@@ -562,11 +574,13 @@ Item {
         }
         root.pluginResults = plugins
         root.themeResults = []
+        root.backgroundResults = []
         return rows
       }
 
       root.themeResults = []
       root.pluginResults = []
+      root.backgroundResults = []
       for (var i = 0; i < data.length; i++) {
         var item = data[i] || {}
         rows.push({
@@ -582,6 +596,7 @@ Item {
     } catch (e) {
       root.themeResults = []
       root.pluginResults = []
+      root.backgroundResults = []
       rows.push({
         itemId: "result.error",
         label: "Invalid JSON from cOMtrol",
@@ -614,6 +629,19 @@ Item {
     if (!theme.name)
       return
     themeApplyProc.command = ["omarchy-theme-set", String(theme.name)]
+    themeApplyProc.running = true
+  }
+
+  function applyBackground(background) {
+    if (!background)
+      return
+    var path = String(background.path || background["path"] || "")
+    if (!path)
+      return
+    // Same end-step as omarchy-menu: switcher returns a path, then bg-set applies it.
+    if (themeApplyProc.running)
+      themeApplyProc.running = false
+    themeApplyProc.command = ["omarchy-theme-bg-set", path]
     themeApplyProc.running = true
   }
 
@@ -787,6 +815,8 @@ Item {
         root.rebuildDisplay()
         if (root.usePreviewTheme)
           Qt.callLater(function() { previewTheme.focusCarousel() })
+        else if (root.usePreviewBackground)
+          Qt.callLater(function() { previewBackground.focusCarousel() })
         else if (root.useBrowsePlugins)
           Qt.callLater(function() { browsePlugins.focusGrid() })
         else
@@ -801,7 +831,8 @@ Item {
         if (!text || !String(text).trim())
           return
         if (root.loading && root.resultRows.length === 0
-            && root.themeResults.length === 0 && root.pluginResults.length === 0) {
+            && root.themeResults.length === 0 && root.pluginResults.length === 0
+            && root.backgroundResults.length === 0) {
           root.resultRows = [{
             itemId: "result.error",
             label: String(text).trim().split("\n")[0],
@@ -822,7 +853,8 @@ Item {
       if (!root.loading)
         return
       if (exitCode !== 0 && root.resultRows.length === 0
-          && root.themeResults.length === 0 && root.pluginResults.length === 0) {
+          && root.themeResults.length === 0 && root.pluginResults.length === 0
+          && root.backgroundResults.length === 0) {
         root.resultRows = [{
           itemId: "result.error",
           label: "cOMtrol failed (exit " + exitCode + ")",
@@ -837,6 +869,8 @@ Item {
       root.rebuildDisplay()
       if (root.usePreviewTheme)
         Qt.callLater(function() { previewTheme.focusCarousel() })
+      else if (root.usePreviewBackground)
+        Qt.callLater(function() { previewBackground.focusCarousel() })
       else if (root.useBrowsePlugins)
         Qt.callLater(function() { browsePlugins.focusGrid() })
     }
@@ -879,6 +913,16 @@ Item {
       onThemeActivated: function(theme) { root.applyTheme(theme) }
       onThemeRemoveRequested: function(theme) { root.removeTheme(theme) }
       onDismissRequested: root.dismiss()
+    }
+
+    Layouts.BackgroundPreview {
+      id: previewBackground
+      anchors.fill: parent
+      visible: root.usePreviewBackground
+      backgrounds: root.backgroundResults
+      onBackRequested: root.goBack()
+      onDismissRequested: root.dismiss()
+      onBackgroundActivated: function(background) { root.applyBackground(background) }
     }
 
     Layouts.BrowsePlugins {
