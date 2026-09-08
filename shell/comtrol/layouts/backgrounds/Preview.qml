@@ -27,6 +27,7 @@ Item {
   signal dismissRequested()
   signal indexChanged(int index)
   signal backgroundActivated(var background)
+  signal backgroundRemoveRequested(var background)
 
   readonly property var imageArray: {
     var out = []
@@ -87,6 +88,14 @@ Item {
       root.backgroundActivated(item)
   }
 
+  function removeSelected() {
+    if (root.selectedIndex < 0 || root.selectedIndex >= imageArray.length)
+      return
+    var item = imageArray[root.selectedIndex]
+    if (item && item.path)
+      root.backgroundRemoveRequested(item)
+  }
+
   function revealWhenSettled() {
     Qt.callLater(function() {
       if (root.visible && imageArray.length > 0) {
@@ -131,6 +140,9 @@ Item {
           event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
           root.activateSelected()
+          event.accepted = true
+        } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier)) {
+          root.removeSelected()
           event.accepted = true
         } else if (event.key === Qt.Key_Backspace) {
           root.backRequested()

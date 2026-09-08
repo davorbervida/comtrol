@@ -34,6 +34,7 @@ Item {
   property int searchSerial: 0
   property int installedPluginsSerial: 0
 
+  readonly property var appLibrary: root.shell ? root.shell.appLibrary : null
   readonly property bool usePreviewTheme: showingResults
     && !loading
     && pendingDomain === "themes"
@@ -72,7 +73,8 @@ Item {
   property int rowSpacing: Style.spacing.xs
   property int cardWidth: Math.min(Style.space(360), panel.width - Style.gapsOut * 2)
   readonly property bool resultsHaveDetail: false
-  readonly property int activeRowHeight: resultsHaveDetail ? detailRowHeight : rowHeight
+  readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
+  readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive) ? detailRowHeight : rowHeight
   readonly property int visibleRowsHeight: Math.min(
     Math.max(displayModel.count, 1) * (activeRowHeight + rowSpacing) - rowSpacing,
     Math.max(activeRowHeight, panel.height - Style.gapsOut * 2 - headerHeight - contentSpacing - contentMargin * 2)
@@ -98,7 +100,7 @@ Item {
     "themes": {
       title: "Themes",
       rows: [
-        { itemId: "themes.web", label: "Add", icon: "󰐕", kind: "action", domain: "themes", mode: "web" },
+        { itemId: "themes.web", label: "Install", icon: "󰐕", kind: "action", domain: "themes", mode: "web" },
         { itemId: "themes.local", label: "Installed", icon: "󰉋", kind: "action", domain: "themes", mode: "local" }
       ]
     },
@@ -121,21 +123,21 @@ Item {
     "plugins": {
       title: "Plugins",
       rows: [
-        { itemId: "plugins.web", label: "Add", icon: "󰐕", kind: "action", domain: "plugins", mode: "web" },
+        { itemId: "plugins.web", label: "Install", icon: "󰐕", kind: "action", domain: "plugins", mode: "web" },
         { itemId: "plugins.local", label: "Installed", icon: "󰉋", kind: "action", domain: "plugins", mode: "local" }
       ]
     },
     "packages": {
       title: "Packages",
       rows: [
-        { itemId: "packages.web", label: "Add", icon: "󰐕", kind: "action", domain: "packages", mode: "web" },
+        { itemId: "packages.web", label: "Install", icon: "󰐕", kind: "action", domain: "packages", mode: "web" },
         { itemId: "packages.local", label: "Installed", icon: "󰉋", kind: "action", domain: "packages", mode: "local" }
       ]
     },
     "aurs": {
       title: "AUR",
       rows: [
-        { itemId: "aurs.web", label: "Add", icon: "󰐕", kind: "action", domain: "aurs", mode: "web" },
+        { itemId: "aurs.web", label: "Install", icon: "󰐕", kind: "action", domain: "aurs", mode: "web" },
         { itemId: "aurs.local", label: "Installed", icon: "󰉋", kind: "action", domain: "aurs", mode: "local" }
       ]
     }
@@ -276,6 +278,8 @@ Item {
     root.selectedIndex = 0
     root.cursorActive = true
     root.rebuildDisplay()
+    if (root.appLibrary)
+      root.appLibrary.refreshIcons()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -305,27 +309,193 @@ Item {
     return (root.currentMenu().title || "Control") + "…"
   }
 
+  function parentMenuOf(menuId) {
+    var id = String(menuId || "")
+    if (!id)
+      return ""
+    for (var key in root.menus) {
+      var rows = (root.menus[key] && root.menus[key].rows) || []
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i] || {}
+        if (String(row.kind || "") === "menu" && String(row.itemId || "") === id)
+          return key
+      }
+    }
+    return ""
+  }
+
+  function ancestorsOf(menuId) {
+    var chain = []
+    var cur = root.parentMenuOf(menuId)
+    while (cur) {
+      chain.unshift(cur)
+      if (cur === "root")
+        break
+      cur = root.parentMenuOf(cur)
+    }
+    return chain
+  }
+
+  // Flatten actionable rows under menuId (and nested menus), with breadcrumb detail.
+  function collectDescendantRows(menuId) {
+    var out = []
+    function walk(id, pathLabels) {
+      var menu = root.menus[id]
+      if (!menu)
+        return
+      var rows = menu.rows || []
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i] || {}
+        var itemId = String(row.itemId || "")
+        var label = String(row.label || "")
+        var kind = String(row.kind || "")
+        out.push({
+          itemId: itemId,
+          kind: kind,
+          icon: String(row.icon || ""),
+          label: label,
+          detail: pathLabels.join(" › "),
+          domain: String(row.domain || ""),
+          mode: String(row.mode || "")
+        })
+        if (kind === "menu" && itemId)
+          walk(itemId, pathLabels.concat([label]))
+      }
+    }
+    walk(String(menuId || "root"), [])
+    return out
+  }
+
+  function rowMatchesQuery(row, query) {
+    if (!query)
+      return true
+    var q = String(query).toLowerCase()
+    var label = String(row.label || "").toLowerCase()
+    var itemId = String(row.itemId || "").toLowerCase()
+    var detail = String(row.detail || "").toLowerCase()
+    return label.indexOf(q) >= 0 || itemId.indexOf(q) >= 0 || detail.indexOf(q) >= 0
+  }
+
+  // Desktop apps via Omarchy AppLibrary (same source as omarchy.menu Apps),
+  // with a DesktopEntries fallback if the shell proxy is unavailable.
+  function collectAppSearchRows(query) {
+    var out = []
+    var q = String(query || "").trim()
+    if (!q)
+      return out
+
+    var rows = []
+    if (root.appLibrary) {
+      try {
+        rows = root.appLibrary.sortedEntries(q) || []
+      } catch (e) {
+        console.warn("comtrol appLibrary.sortedEntries failed:", e)
+        rows = []
+      }
+    }
+
+    var count = rows && rows.length !== undefined ? rows.length : 0
+    if (count > 0) {
+      var limit = Math.min(count, 40)
+      for (var i = 0; i < limit; i++) {
+        var hit = rows[i] || {}
+        var entry = hit.entry || hit
+        if (!entry)
+          continue
+        var appId = String(entry.id || "")
+        if (!appId)
+          continue
+        var label = appId
+        var subtext = ""
+        var iconName = ""
+        try {
+          if (root.appLibrary) {
+            label = root.appLibrary.entryName(entry) || appId
+            subtext = root.appLibrary.entrySubtext(entry) || ""
+          } else {
+            label = String(entry.name || appId)
+            subtext = String(entry.genericName || "")
+          }
+          iconName = String(entry.icon || "")
+        } catch (e2) {
+          label = appId
+        }
+        out.push({
+          itemId: appId,
+          kind: "app",
+          icon: "",
+          appIcon: iconName,
+          label: label,
+          detail: subtext || "Application",
+          domain: "",
+          mode: ""
+        })
+      }
+      return out
+    }
+
+    // Fallback: scan DesktopEntries directly (same underlying catalog).
+    try {
+      var values = DesktopEntries.applications.values || []
+      var ql = q.toLowerCase()
+      var max = Math.min(values.length, 5000)
+      for (var j = 0; j < max && out.length < 40; j++) {
+        var e = values[j]
+        if (!e || e.noDisplay)
+          continue
+        var name = String(e.name || "")
+        var id = String(e.id || "")
+        if (!name && !id)
+          continue
+        var hay = (name + " " + String(e.genericName || "") + " " + id).toLowerCase()
+        if (hay.indexOf(ql) < 0)
+          continue
+        out.push({
+          itemId: id || name,
+          kind: "app",
+          icon: "",
+          appIcon: String(e.icon || ""),
+          label: name || id,
+          detail: String(e.genericName || "Application"),
+          domain: "",
+          mode: ""
+        })
+      }
+    } catch (e3) {
+      console.warn("comtrol DesktopEntries fallback failed:", e3)
+    }
+    return out
+  }
+
   function rebuildDisplay() {
-    var menu = root.currentMenu()
-    var rows = menu.rows || []
-    // Packages → Add / AUR → Add use Rust search; don't re-filter client-side.
     var q = root.usesRustFilterSearch() ? "" : root.filterText.trim().toLowerCase()
+    var rows = []
+
+    if (root.showingResults) {
+      rows = (root.currentMenu().rows || []).slice()
+    } else if (q) {
+      // Search current menu + nested submenus, then desktop apps (AppLibrary).
+      rows = root.collectDescendantRows(root.activeMenu)
+      var appHits = root.collectAppSearchRows(root.filterText.trim())
+      for (var h = 0; h < appHits.length; h++)
+        rows.push(appHits[h])
+    } else {
+      rows = ((root.menus[root.activeMenu] || root.menus.root).rows || []).slice()
+    }
 
     displayModel.clear()
     for (var i = 0; i < rows.length; i++) {
-      var row = rows[i]
-      var itemId = String(row.itemId || row.id || "")
-      var label = String(row.label || "")
-      var detail = String(row.detail || "")
-      if (q && label.toLowerCase().indexOf(q) < 0 && itemId.toLowerCase().indexOf(q) < 0
-          && detail.toLowerCase().indexOf(q) < 0)
+      var row = rows[i] || {}
+      // App hits are already filtered/scored by AppLibrary.
+      if (q && String(row.kind || "") !== "app" && !root.rowMatchesQuery(row, q))
         continue
       displayModel.append({
-        itemId: itemId,
+        itemId: String(row.itemId || row.id || ""),
         kind: String(row.kind || ""),
         icon: String(row.icon || ""),
-        label: label,
-        detail: detail,
+        appIcon: String(row.appIcon || ""),
+        label: String(row.label || ""),
+        detail: String(row.detail || ""),
         domain: String(row.domain || ""),
         mode: String(row.mode || "")
       })
@@ -434,7 +604,8 @@ Item {
     if (index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
     if (row.kind === "menu") {
-      root.navStack.push(root.activeMenu)
+      // From search hits, rebuild the back stack so Back walks the real parents.
+      root.navStack = root.ancestorsOf(row.itemId)
       root.activeMenu = row.itemId
       root.filterText = ""
       root.selectedIndex = 0
@@ -444,6 +615,12 @@ Item {
     }
     if (row.kind === "action" && row.domain && row.mode) {
       root.runComtrol(row.domain, row.mode, row.label)
+      return
+    }
+    if (row.kind === "app") {
+      if (root.appLibrary)
+        root.appLibrary.launch(row.itemId, row.label)
+      root.dismiss()
       return
     }
   }
@@ -466,7 +643,7 @@ Item {
     rustSearchTimer.stop()
     root.rebuildDisplay()
 
-    // Installed → system view (-v); Add → search web (-s -w);
+    // Installed → system view (-v); Install → search web (-s -w);
     // Background → system view with source (-v -background -current|…)
     root.searchSerial += 1
     searchProcess.serial = root.searchSerial
@@ -752,6 +929,19 @@ Item {
     themeRemoveProc.running = true
   }
 
+  function removeBackground(background) {
+    if (!background)
+      return
+    var path = String(background.path || background["path"] || "")
+    if (!path)
+      return
+    // Rust: cOMtrol -r -background <absolute-path>
+    if (themeRemoveProc.running)
+      themeRemoveProc.running = false
+    themeRemoveProc.command = [root.runScript(), "-r", "-background", path]
+    themeRemoveProc.running = true
+  }
+
   ListModel { id: displayModel }
 
   Process {
@@ -770,6 +960,8 @@ Item {
         root.runComtrol("themes", "local", "Installed")
       else if (root.pendingDomain === "plugins" && root.pendingMode === "web")
         root.refreshInstalledPlugins()
+      else if (root.pendingDomain === "background")
+        root.runComtrol("background", root.pendingMode, root.resultsTitle)
     }
   }
 
@@ -797,6 +989,14 @@ Item {
         root.installedPluginIds = ids
         root.applyInstalledFlags()
       }
+    }
+  }
+
+  Connections {
+    target: root.appLibrary
+    function onAppsChanged() {
+      if (root.opened && root.menuSearchActive)
+        root.rebuildDisplay()
     }
   }
 
@@ -923,6 +1123,7 @@ Item {
       onBackRequested: root.goBack()
       onDismissRequested: root.dismiss()
       onBackgroundActivated: function(background) { root.applyBackground(background) }
+      onBackgroundRemoveRequested: function(background) { root.removeBackground(background) }
     }
 
     Layouts.BrowsePlugins {
@@ -1040,6 +1241,7 @@ Item {
               required property string itemId
               required property string kind
               required property string icon
+              required property string appIcon
               required property string label
               required property string detail
               required property string domain
@@ -1047,6 +1249,7 @@ Item {
 
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
               readonly property bool hasDetail: detail.length > 0
+              readonly property bool isApp: kind === "app"
 
               width: ListView.view.width
               height: hasDetail ? root.detailRowHeight : root.rowHeight
@@ -1060,22 +1263,39 @@ Item {
                 anchors.rightMargin: Style.space(12)
                 spacing: Style.space(12)
 
-                Text {
-                  textFormat: Text.PlainText
-                  text: row.icon
-                  color: row.hasCursor ? root.selectedText : root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  width: Style.space(24)
+                Item {
+                  width: Style.space(36)
                   height: parent.height
-                  verticalAlignment: Text.AlignVCenter
-                  horizontalAlignment: Text.AlignHCenter
+
+                  Text {
+                    textFormat: Text.PlainText
+                    anchors.centerIn: parent
+                    visible: !row.isApp
+                    text: row.icon
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.iconLarge
+                  }
+
+                  Image {
+                    anchors.centerIn: parent
+                    visible: row.isApp
+                    width: Style.font.iconLarge
+                    height: Style.font.iconLarge
+                    fillMode: Image.PreserveAspectFit
+                    sourceSize.width: width * Screen.devicePixelRatio
+                    sourceSize.height: height * Screen.devicePixelRatio
+                    source: row.isApp && root.appLibrary
+                      ? root.appLibrary.iconSource(row.appIcon)
+                      : ""
+                    asynchronous: true
+                  }
                 }
 
                 Column {
                   width: Math.max(
                     Style.space(40),
-                    parent.width - Style.space(24) - Style.space(12) - Style.space(16) - Style.space(24)
+                    parent.width - Style.space(36) - Style.space(12) - Style.space(16) - Style.space(24)
                   )
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(2)
@@ -1105,9 +1325,9 @@ Item {
 
                 Text {
                   textFormat: Text.PlainText
-                  text: row.kind === "menu" ? "›" : ""
+                  text: (row.kind === "menu" || row.kind === "action") ? "›" : ""
                   color: row.hasCursor ? root.selectedText : root.foreground
-                  opacity: row.kind === "menu" ? 0.36 : 0
+                  opacity: (row.kind === "menu" || row.kind === "action") ? 0.36 : 0
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                   width: Style.space(16)

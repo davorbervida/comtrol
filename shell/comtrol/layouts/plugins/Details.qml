@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell.Io
 import qs.Commons
 
-// Full plugin detail view opened from BrowsePlugins.
+// Full plugin detail view opened from Browse.
 Item {
   id: root
 
@@ -128,6 +128,12 @@ Item {
           root.removeRequested(root.plugin)
         else
           root.installRequested(root.plugin)
+        event.accepted = true
+      } else if (event.key === Qt.Key_A && (event.modifiers & Qt.ShiftModifier) && root.canInstall && !root.installed) {
+        root.installRequested(root.plugin)
+        event.accepted = true
+      } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier) && root.installed) {
+        root.removeRequested(root.plugin)
         event.accepted = true
       } else if (event.key === Qt.Key_H) {
         root.sendHeart()

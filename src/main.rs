@@ -169,7 +169,12 @@ fn run(args: &[String]) -> Result<(), String> {
                 return Err("remove (-r) does not take -l/-w".into());
             }
             if values.is_empty() {
-                return Err("remove requires at least one name/id (e.g. -r -theme momentum)".into());
+                return Err(match domain {
+                    Domain::Background => {
+                        "remove background requires an absolute path (e.g. -r -background /path/to/image.png)".into()
+                    }
+                    _ => "remove requires at least one name/id (e.g. -r -theme momentum)".into(),
+                });
             }
             match domain {
                 Domain::Themes => remove::themes::remove(&values),
@@ -179,7 +184,8 @@ fn run(args: &[String]) -> Result<(), String> {
                 Domain::Bindings => remove::bindings::remove(&values),
                 Domain::WebApps => remove::web_apps::remove(&values),
                 Domain::Background => {
-                    return Err("remove is not available for background".into());
+                    let path = values.join(" ");
+                    println!("{}", remove::backgrounds::remove(&path));
                 }
             }
         }
@@ -238,11 +244,12 @@ Usage:
   cOMtrol -v <domain>
   cOMtrol -v -background <-current|-themes|-wallpapers|-all>
   cOMtrol -r <domain> <name...>
+  cOMtrol -r -background <absolute-path>
 
 Actions:
   -s, --search          Search (JSON stdout)
   -v, --view, --system  List installed / system state (JSON stdout)
-  -r, --remove          Remove by name/id
+  -r, --remove          Remove by name/id (or absolute image path for -background)
 
 Domains:
   -theme, -plugin, -package, -aur, -binding, -webapp, -background
@@ -266,6 +273,7 @@ Examples:
   cOMtrol -v -background -wallpapers
   cOMtrol -v -background -all
   cOMtrol -r -theme momentum
-  cOMtrol -r -theme -momentum"
+  cOMtrol -r -theme -momentum
+  cOMtrol -r -background /home/user/Pictures/Wallpapers/photo.jpg"
     );
 }

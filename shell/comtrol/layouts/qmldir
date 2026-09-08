@@ -1,4 +1,4 @@
-PreviewTheme 1.0 PreviewTheme.qml
-BrowsePlugins 1.0 BrowsePlugins.qml
-PluginDetail 1.0 PluginDetail.qml
+PreviewTheme 1.0 themes/Preview.qml
+BrowsePlugins 1.0 plugins/Browse.qml
+PluginDetail 1.0 plugins/Details.qml
 BackgroundPreview 1.0 backgrounds/Preview.qml
