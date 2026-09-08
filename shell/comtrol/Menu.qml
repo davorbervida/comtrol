@@ -25,6 +25,7 @@ Item {
   property string resultsTitle: "Results"
   property var resultRows: []
   property var themeResults: []
+  property var pluginResults: []
   property string pendingDomain: ""
   property string pendingMode: ""
   property int searchSerial: 0
@@ -33,6 +34,11 @@ Item {
     && !loading
     && pendingDomain === "themes"
     && (pendingMode === "local" || pendingMode === "web")
+  readonly property bool useBrowsePlugins: showingResults
+    && !loading
+    && pendingDomain === "plugins"
+    && pendingMode === "web"
+  readonly property bool useFullscreenLayout: usePreviewTheme || useBrowsePlugins
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -40,7 +46,7 @@ Item {
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
   property color selectedBorder: Color.menu.selectedBorder
   property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", selectedBorder, 0)
-  property color scrim: usePreviewTheme ? Color.imagePicker.scrim : Color.menu.scrim
+  property color scrim: useFullscreenLayout ? Color.imagePicker.scrim : Color.menu.scrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
   readonly property int cornerRadius: Style.cornerRadius
@@ -49,11 +55,14 @@ Item {
   property int contentSpacing: Style.spacing.md
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int rowHeight: Math.max(Style.space(36), Style.font.body + Style.spacing.controlPaddingY * 2)
+  property int detailRowHeight: Math.max(Style.space(52), Style.font.body + Style.font.caption + Style.spacing.controlPaddingY * 2)
   property int rowSpacing: Style.spacing.xs
   property int cardWidth: Math.min(Style.space(360), panel.width - Style.gapsOut * 2)
+  readonly property bool resultsHaveDetail: false
+  readonly property int activeRowHeight: resultsHaveDetail ? detailRowHeight : rowHeight
   readonly property int visibleRowsHeight: Math.min(
-    Math.max(displayModel.count, 1) * (rowHeight + rowSpacing) - rowSpacing,
-    Math.max(rowHeight, panel.height - Style.gapsOut * 2 - headerHeight - contentSpacing - contentMargin * 2)
+    Math.max(displayModel.count, 1) * (activeRowHeight + rowSpacing) - rowSpacing,
+    Math.max(activeRowHeight, panel.height - Style.gapsOut * 2 - headerHeight - contentSpacing - contentMargin * 2)
   )
   readonly property int cardHeight: headerHeight + contentSpacing + visibleRowsHeight + contentMargin * 2
 
@@ -153,6 +162,15 @@ Item {
     var repo = root.jsonField(item, "repo")
     var source = root.jsonField(item, "source")
 
+    // Plugin catalog: prefer display name (repo is a URL, not a pacman repo).
+    if (root.pendingDomain === "plugins") {
+      if (name)
+        return name
+      if (itemId)
+        return itemId
+      return "?"
+    }
+
     // pacman web results: repo/name
     if (repo && name && !fullName && !source)
       return repo + "/" + name
@@ -163,6 +181,22 @@ Item {
     if (fullName)
       return fullName
     return "?"
+  }
+
+  function resultDetail(item) {
+    if (!item || typeof item !== "object")
+      return ""
+    if (root.pendingDomain !== "plugins" || root.pendingMode !== "web")
+      return ""
+
+    var version = root.jsonField(item, "version")
+    var repo = root.jsonField(item, "repo")
+    var parts = []
+    if (version)
+      parts.push(version)
+    if (repo)
+      parts.push(repo)
+    return parts.join("  ")
   }
 
   function resultItemId(item, index) {
@@ -209,6 +243,7 @@ Item {
     root.loading = false
     root.resultRows = []
     root.themeResults = []
+    root.pluginResults = []
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = true
@@ -253,13 +288,16 @@ Item {
       var row = rows[i]
       var itemId = String(row.itemId || row.id || "")
       var label = String(row.label || "")
-      if (q && label.toLowerCase().indexOf(q) < 0 && itemId.toLowerCase().indexOf(q) < 0)
+      var detail = String(row.detail || "")
+      if (q && label.toLowerCase().indexOf(q) < 0 && itemId.toLowerCase().indexOf(q) < 0
+          && detail.toLowerCase().indexOf(q) < 0)
         continue
       displayModel.append({
         itemId: itemId,
         kind: String(row.kind || ""),
         icon: String(row.icon || ""),
         label: label,
+        detail: detail,
         domain: String(row.domain || ""),
         mode: String(row.mode || "")
       })
@@ -334,6 +372,7 @@ Item {
       root.loading = false
       root.resultRows = []
       root.themeResults = []
+      root.pluginResults = []
       root.filterText = ""
       root.selectedIndex = 0
       root.cursorActive = true
@@ -378,6 +417,7 @@ Item {
     root.loading = true
     root.resultRows = []
     root.themeResults = []
+    root.pluginResults = []
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = false
@@ -428,16 +468,41 @@ Item {
           })
         }
         root.themeResults = themes
+        root.pluginResults = []
+        return rows
+      }
+
+      if (root.pendingDomain === "plugins" && root.pendingMode === "web") {
+        var plugins = []
+        for (var p = 0; p < data.length; p++) {
+          var plugin = data[p] || {}
+          plugins.push({
+            id: root.jsonField(plugin, "id"),
+            name: root.jsonField(plugin, "name"),
+            version: root.jsonField(plugin, "version"),
+            author: root.jsonField(plugin, "author"),
+            repo: root.jsonField(plugin, "repo"),
+            description: root.jsonField(plugin, "description"),
+            preview: root.jsonField(plugin, "preview_image"),
+            install_command: root.jsonField(plugin, "install_command"),
+            install_available: !!(plugin.install_available || plugin["install_available"]),
+            mode: "web"
+          })
+        }
+        root.pluginResults = plugins
+        root.themeResults = []
         return rows
       }
 
       root.themeResults = []
+      root.pluginResults = []
       for (var i = 0; i < data.length; i++) {
         var item = data[i] || {}
         rows.push({
           itemId: root.resultItemId(item, i),
           label: root.resultLabel(item),
-          icon: "󰈔",
+          detail: root.resultDetail(item),
+          icon: root.pendingDomain === "plugins" ? "󰐱" : "󰈔",
           kind: "result",
           domain: root.pendingDomain || "",
           mode: root.pendingMode || ""
@@ -445,9 +510,11 @@ Item {
       }
     } catch (e) {
       root.themeResults = []
+      root.pluginResults = []
       rows.push({
         itemId: "result.error",
         label: "Invalid JSON from cOMtrol",
+        detail: "",
         icon: "󰀦",
         kind: "result",
         domain: "",
@@ -476,6 +543,18 @@ Item {
     if (!theme.name)
       return
     themeApplyProc.command = ["omarchy-theme-set", String(theme.name)]
+    themeApplyProc.running = true
+  }
+
+  function applyPlugin(plugin) {
+    if (!plugin)
+      return
+    var cmd = String(plugin.install_command || "")
+    if (!cmd)
+      return
+    if (themeApplyProc.running)
+      themeApplyProc.running = false
+    themeApplyProc.command = ["bash", "-lc", cmd]
     themeApplyProc.running = true
   }
 
@@ -520,6 +599,8 @@ Item {
         root.rebuildDisplay()
         if (root.usePreviewTheme)
           Qt.callLater(function() { previewTheme.focusCarousel() })
+        else if (root.useBrowsePlugins)
+          Qt.callLater(function() { browsePlugins.focusGrid() })
         else
           Qt.callLater(function() { keyCatcher.forceActiveFocus() })
       }
@@ -531,10 +612,12 @@ Item {
           return
         if (!text || !String(text).trim())
           return
-        if (root.loading && root.resultRows.length === 0 && root.themeResults.length === 0) {
+        if (root.loading && root.resultRows.length === 0
+            && root.themeResults.length === 0 && root.pluginResults.length === 0) {
           root.resultRows = [{
             itemId: "result.error",
             label: String(text).trim().split("\n")[0],
+            detail: "",
             icon: "󰀦",
             kind: "result",
             domain: "",
@@ -550,10 +633,12 @@ Item {
         return
       if (!root.loading)
         return
-      if (exitCode !== 0 && root.resultRows.length === 0 && root.themeResults.length === 0) {
+      if (exitCode !== 0 && root.resultRows.length === 0
+          && root.themeResults.length === 0 && root.pluginResults.length === 0) {
         root.resultRows = [{
           itemId: "result.error",
           label: "cOMtrol failed (exit " + exitCode + ")",
+          detail: "",
           icon: "󰀦",
           kind: "result",
           domain: "",
@@ -564,6 +649,8 @@ Item {
       root.rebuildDisplay()
       if (root.usePreviewTheme)
         Qt.callLater(function() { previewTheme.focusCarousel() })
+      else if (root.useBrowsePlugins)
+        Qt.callLater(function() { browsePlugins.focusGrid() })
     }
   }
 
@@ -591,7 +678,7 @@ Item {
 
     MouseArea {
       anchors.fill: parent
-      onClicked: root.usePreviewTheme ? root.goBack() : root.dismiss()
+      onClicked: root.useFullscreenLayout ? root.goBack() : root.dismiss()
     }
 
     Layouts.PreviewTheme {
@@ -605,9 +692,18 @@ Item {
       onThemeRemoveRequested: function(theme) { root.removeTheme(theme) }
     }
 
+    Layouts.BrowsePlugins {
+      id: browsePlugins
+      anchors.fill: parent
+      visible: root.useBrowsePlugins
+      plugins: root.pluginResults
+      onBackRequested: root.goBack()
+      onPluginActivated: function(plugin) { root.applyPlugin(plugin) }
+    }
+
     BorderSurface {
       id: card
-      visible: !root.usePreviewTheme
+      visible: !root.useFullscreenLayout
       width: root.cardWidth
       height: Math.min(root.cardHeight, panel.height - Style.gapsOut * 2)
       radius: root.cornerRadius
@@ -700,13 +796,15 @@ Item {
               required property string kind
               required property string icon
               required property string label
+              required property string detail
               required property string domain
               required property string mode
 
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
+              readonly property bool hasDetail: detail.length > 0
 
               width: ListView.view.width
-              height: root.rowHeight
+              height: hasDetail ? root.detailRowHeight : root.rowHeight
               radius: root.cornerRadius
               color: hasCursor ? root.selectedBackground : "transparent"
               borderSpec: hasCursor ? root.selectedBorderSpec : Border.none()
@@ -729,19 +827,35 @@ Item {
                   horizontalAlignment: Text.AlignHCenter
                 }
 
-                Text {
-                  textFormat: Text.PlainText
-                  text: row.label
-                  color: row.hasCursor ? root.selectedText : root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  height: parent.height
-                  verticalAlignment: Text.AlignVCenter
-                  elide: Text.ElideRight
+                Column {
                   width: Math.max(
                     Style.space(40),
                     parent.width - Style.space(24) - Style.space(12) - Style.space(16) - Style.space(24)
                   )
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
+
+                  Text {
+                    textFormat: Text.PlainText
+                    width: parent.width
+                    text: row.label
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    width: parent.width
+                    visible: row.hasDetail
+                    text: row.detail
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    opacity: 0.62
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideMiddle
+                  }
                 }
 
                 Text {
