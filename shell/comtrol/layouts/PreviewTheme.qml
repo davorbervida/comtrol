@@ -9,6 +9,7 @@ Item {
 
   // [{ name, preview, path, source }]
   property var themes: []
+  property string mode: "local" // "local" | "web"
   property string filterText: ""
   property int selectedIndex: 0
   property bool layoutSettled: false
@@ -28,6 +29,7 @@ Item {
 
   signal backRequested()
   signal themeActivated(var theme)
+  signal themeRemoveRequested(var theme)
   signal filterChanged(string text)
   signal indexChanged(int index)
 
@@ -169,6 +171,16 @@ Item {
       root.themeActivated(item.theme || item)
   }
 
+  function removeSelected() {
+    if (root.mode !== "local")
+      return
+    if (!itemMatches(root.selectedIndex))
+      return
+    var item = imageArray[root.selectedIndex]
+    if (item)
+      root.themeRemoveRequested(item.theme || item)
+  }
+
   function revealWhenSettled() {
     Qt.callLater(function() {
       if (root.visible && imageArray.length > 0) {
@@ -219,6 +231,9 @@ Item {
           event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
           root.activateSelected()
+          event.accepted = true
+        } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
+          root.removeSelected()
           event.accepted = true
         } else if (Util.editsFilter(event, root.filterText)) {
           root.updateFilter(Util.editedFilter(event, root.filterText))

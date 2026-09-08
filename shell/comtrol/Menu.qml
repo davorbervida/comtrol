@@ -284,6 +284,8 @@ Item {
         searchProcess.running = false
       if (themeApplyProc.running)
         themeApplyProc.running = false
+      if (themeRemoveProc.running)
+        themeRemoveProc.running = false
       root.showingResults = false
       root.loading = false
       root.resultRows = []
@@ -409,19 +411,51 @@ Item {
   }
 
   function applyTheme(theme) {
-    if (!theme || !theme.name)
+    if (!theme)
       return
-    // Browse (web) previews are remote catalogs — only apply installed/local themes.
-    if (root.pendingMode === "web" || theme.mode === "web")
+    if (themeApplyProc.running)
+      themeApplyProc.running = false
+
+    // Local: apply installed theme. Web: install from git (also applies).
+    if (root.pendingMode === "web" || theme.mode === "web") {
+      var repo = theme.repo || ""
+      if (!repo)
+        return
+      themeApplyProc.command = ["omarchy-theme-install", String(repo)]
+      themeApplyProc.running = true
+      return
+    }
+
+    if (!theme.name)
       return
     themeApplyProc.command = ["omarchy-theme-set", String(theme.name)]
     themeApplyProc.running = true
+  }
+
+  function removeTheme(theme) {
+    if (!theme || !theme.name)
+      return
+    if (root.pendingMode !== "local" && theme.mode !== "local")
+      return
+    if (themeRemoveProc.running)
+      themeRemoveProc.running = false
+    themeRemoveProc.command = [root.runScript(), "-r", "-theme", String(theme.name)]
+    themeRemoveProc.running = true
   }
 
   ListModel { id: displayModel }
 
   Process {
     id: themeApplyProc
+  }
+
+  Process {
+    id: themeRemoveProc
+    onExited: function(exitCode) {
+      // Refresh local theme list after Rust remove (success or partial).
+      if (root.pendingDomain === "themes" && root.pendingMode === "local")
+        root.runComtrol("themes", "local", "Installed")
+    }
   }
 
   Process {
@@ -504,8 +538,10 @@ Item {
       anchors.fill: parent
       visible: root.usePreviewTheme
       themes: root.themeResults
+      mode: root.pendingMode
       onBackRequested: root.goBack()
       onThemeActivated: function(theme) { root.applyTheme(theme) }
+      onThemeRemoveRequested: function(theme) { root.removeTheme(theme) }
     }
 
     BorderSurface {

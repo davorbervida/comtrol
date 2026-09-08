@@ -7,7 +7,7 @@ use crate::control::system::packages;
 ///
 /// Only names that appear in the installed native package list are
 /// uninstalled. Others are skipped. Prints the exact packages that will be
-/// removed before running `sudo pacman -R` (root password required).
+/// removed before running `pkexec pacman -R` (root password required).
 pub fn remove<S: AsRef<str>>(packages: &[S]) {
     if packages.is_empty() {
         println!("No packages specified.");
@@ -45,7 +45,7 @@ pub fn remove<S: AsRef<str>>(packages: &[S]) {
         println!("  {name}");
     }
 
-    let status = Command::new("sudo")
+    let status = Command::new("pkexec")
         .arg("pacman")
         .arg("-R")
         .args(&to_remove)
@@ -57,6 +57,6 @@ pub fn remove<S: AsRef<str>>(packages: &[S]) {
             crate::control::remove::bindings::remove_related(&to_remove);
         }
         Ok(s) => eprintln!("pacman exited with status: {s}"),
-        Err(e) => eprintln!("Failed to run sudo pacman: {e}"),
+        Err(e) => eprintln!("Failed to run pkexec pacman: {e}"),
     }
 }

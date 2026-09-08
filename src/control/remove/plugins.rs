@@ -8,7 +8,7 @@ use crate::control::system::plugins::{self, Plugin, PluginSource};
 ///
 /// Matches [`plugins::load_all`]. User plugins under `~/.config/omarchy/plugins`
 /// are deleted directly. First-party plugins under `/usr/share/omarchy/shell/plugins`
-/// require `sudo`. Unknown ids are skipped. Prints the exact plugins that will
+/// require `pkexec`. Unknown ids are skipped. Prints the exact plugins that will
 /// be removed first, disables them in omarchy-shell when possible, then rescans.
 ///
 /// Note: first-party removals may come back after an `omarchy` package update.
@@ -86,7 +86,7 @@ pub fn remove<S: AsRef<str>>(ids: &[S]) {
     }
 
     if !first_party_paths.is_empty() {
-        let status = Command::new("sudo")
+        let status = Command::new("pkexec")
             .arg("rm")
             .arg("-rf")
             .args(&first_party_paths)
@@ -94,11 +94,11 @@ pub fn remove<S: AsRef<str>>(ids: &[S]) {
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
-                eprintln!("sudo rm exited with status: {s}");
+                eprintln!("pkexec rm exited with status: {s}");
                 ok = false;
             }
             Err(e) => {
-                eprintln!("Failed to run sudo rm: {e}");
+                eprintln!("Failed to run pkexec rm: {e}");
                 ok = false;
             }
         }

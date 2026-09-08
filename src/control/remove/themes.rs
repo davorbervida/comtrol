@@ -7,7 +7,7 @@ use crate::control::system::themes::{self, Theme, ThemeSource};
 /// Remove Omarchy themes by directory name.
 ///
 /// Matches [`themes::load_all`]. User themes are deleted directly; first-party
-/// themes under `/usr/share/omarchy/themes` require `sudo`. Unknown names are
+/// themes under `/usr/share/omarchy/themes` require `pkexec`. Unknown names are
 /// skipped. Prints the exact themes that will be removed first.
 ///
 /// Note: first-party removals may come back after an `omarchy` package update.
@@ -90,7 +90,7 @@ pub fn remove<S: AsRef<str>>(names: &[S]) {
     }
 
     if !first_party_paths.is_empty() {
-        let status = Command::new("sudo")
+        let status = Command::new("pkexec")
             .arg("rm")
             .arg("-rf")
             .args(&first_party_paths)
@@ -98,11 +98,11 @@ pub fn remove<S: AsRef<str>>(names: &[S]) {
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
-                eprintln!("sudo rm exited with status: {s}");
+                eprintln!("pkexec rm exited with status: {s}");
                 ok = false;
             }
             Err(e) => {
-                eprintln!("Failed to run sudo rm: {e}");
+                eprintln!("Failed to run pkexec rm: {e}");
                 ok = false;
             }
         }

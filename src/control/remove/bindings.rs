@@ -70,7 +70,7 @@ pub fn remove_related<S: AsRef<str>>(needles: &[S]) {
 /// Matches [`bindings::load_all`] Bind/Toggle entries by exact `action`, then
 /// deletes the corresponding `o.bind` / `o.bind_toggle` lines from the source
 /// Lua files (system defaults under `/usr/share/omarchy/...` and the user
-/// `~/.config/hypr/bindings.lua`). System files require `sudo`. Multiple
+/// `~/.config/hypr/bindings.lua`). System files require `pkexec`. Multiple
 /// actions can be passed.
 ///
 /// Note: edits under `/usr/share/omarchy` may come back after a package update.
@@ -229,7 +229,7 @@ pub fn remove<S: AsRef<str>>(actions: &[S]) {
 
         let is_system = path.starts_with("/usr/");
         if is_system {
-            let status = Command::new("sudo")
+            let status = Command::new("pkexec")
                 .args(["tee", path])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
@@ -244,7 +244,7 @@ pub fn remove<S: AsRef<str>>(actions: &[S]) {
             match status {
                 Ok(s) if s.success() => println!("Updated {path} (−{removed} line(s))"),
                 Ok(s) => {
-                    eprintln!("sudo tee exited with status: {s} ({path})");
+                    eprintln!("pkexec tee exited with status: {s} ({path})");
                     ok = false;
                 }
                 Err(e) => {
