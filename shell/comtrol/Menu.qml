@@ -27,6 +27,7 @@ Item {
   property var themeResults: []
   property string pendingDomain: ""
   property string pendingMode: ""
+  property int searchSerial: 0
 
   readonly property bool usePreviewTheme: showingResults
     && !loading
@@ -74,8 +75,8 @@ Item {
     "themes": {
       title: "Themes",
       rows: [
-        { itemId: "themes.local", label: "Installed", icon: "󰉋", kind: "action", domain: "themes", mode: "local" },
-        { itemId: "themes.web", label: "Browse", icon: "󰖟", kind: "action", domain: "themes", mode: "web" }
+        { itemId: "themes.web", label: "Add", icon: "󰐕", kind: "action", domain: "themes", mode: "web" },
+        { itemId: "themes.local", label: "Installed", icon: "󰉋", kind: "action", domain: "themes", mode: "local" }
       ]
     },
     "apps": {
@@ -88,22 +89,22 @@ Item {
     "plugins": {
       title: "Plugins",
       rows: [
-        { itemId: "plugins.local", label: "Installed", icon: "󰉋", kind: "action", domain: "plugins", mode: "local" },
-        { itemId: "plugins.web", label: "Browse", icon: "󰖟", kind: "action", domain: "plugins", mode: "web" }
+        { itemId: "plugins.web", label: "Add", icon: "󰐕", kind: "action", domain: "plugins", mode: "web" },
+        { itemId: "plugins.local", label: "Installed", icon: "󰉋", kind: "action", domain: "plugins", mode: "local" }
       ]
     },
     "packages": {
       title: "Packages",
       rows: [
-        { itemId: "packages.local", label: "Installed", icon: "󰉋", kind: "action", domain: "packages", mode: "local" },
-        { itemId: "packages.web", label: "Browse", icon: "󰖟", kind: "action", domain: "packages", mode: "web" }
+        { itemId: "packages.web", label: "Add", icon: "󰐕", kind: "action", domain: "packages", mode: "web" },
+        { itemId: "packages.local", label: "Installed", icon: "󰉋", kind: "action", domain: "packages", mode: "local" }
       ]
     },
     "aurs": {
       title: "AUR",
       rows: [
-        { itemId: "aurs.local", label: "Installed", icon: "󰉋", kind: "action", domain: "aurs", mode: "local" },
-        { itemId: "aurs.web", label: "Browse", icon: "󰖟", kind: "action", domain: "aurs", mode: "web" }
+        { itemId: "aurs.web", label: "Add", icon: "󰐕", kind: "action", domain: "aurs", mode: "web" },
+        { itemId: "aurs.local", label: "Installed", icon: "󰉋", kind: "action", domain: "aurs", mode: "local" }
       ]
     }
   })
@@ -244,7 +245,8 @@ Item {
   function rebuildDisplay() {
     var menu = root.currentMenu()
     var rows = menu.rows || []
-    var q = root.filterText.trim().toLowerCase()
+    // Packages → Add / AUR → Add use Rust search; don't re-filter client-side.
+    var q = root.usesRustFilterSearch() ? "" : root.filterText.trim().toLowerCase()
 
     displayModel.clear()
     for (var i = 0; i < rows.length; i++) {
@@ -273,10 +275,39 @@ Item {
       root.cursorActive = true
   }
 
+  function usesRustFilterSearch() {
+    return root.showingResults
+      && root.pendingMode === "web"
+      && (root.pendingDomain === "packages" || root.pendingDomain === "aurs")
+  }
+
   function setFilter(text) {
     root.filterText = text
     root.selectedIndex = 0
+    if (root.usesRustFilterSearch()) {
+      rustSearchTimer.restart()
+      return
+    }
     root.rebuildDisplay()
+  }
+
+  function runLiveRustSearch() {
+    if (!root.usesRustFilterSearch())
+      return
+
+    if (searchProcess.running)
+      searchProcess.running = false
+
+    root.searchSerial += 1
+    searchProcess.serial = root.searchSerial
+    root.loading = true
+
+    var argv = [root.runScript(), "-s", root.domainFlag(root.pendingDomain), "-w"]
+    var q = root.filterText.trim()
+    if (q)
+      argv.push(q)
+    searchProcess.command = argv
+    searchProcess.running = true
   }
 
   function select(delta) {
@@ -292,6 +323,7 @@ Item {
 
   function goBack() {
     if (root.showingResults) {
+      rustSearchTimer.stop()
       if (searchProcess.running)
         searchProcess.running = false
       if (themeApplyProc.running)
@@ -349,9 +381,12 @@ Item {
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = false
+    rustSearchTimer.stop()
     root.rebuildDisplay()
 
-    // Installed → system view (-v); Browse → search web (-s -w)
+    // Installed → system view (-v); Add → search web (-s -w)
+    root.searchSerial += 1
+    searchProcess.serial = root.searchSerial
     var argv
     if (mode === "local")
       argv = [root.runScript(), "-v", root.domainFlag(domain)]
@@ -472,9 +507,12 @@ Item {
 
   Process {
     id: searchProcess
+    property int serial: 0
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (searchProcess.serial !== root.searchSerial)
+          return
         root.resultRows = root.parseResults(text)
         root.loading = false
         root.selectedIndex = 0
@@ -489,6 +527,8 @@ Item {
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (searchProcess.serial !== root.searchSerial)
+          return
         if (!text || !String(text).trim())
           return
         if (root.loading && root.resultRows.length === 0 && root.themeResults.length === 0) {
@@ -506,6 +546,8 @@ Item {
       }
     }
     onExited: function(exitCode) {
+      if (searchProcess.serial !== root.searchSerial)
+        return
       if (!root.loading)
         return
       if (exitCode !== 0 && root.resultRows.length === 0 && root.themeResults.length === 0) {
@@ -523,6 +565,13 @@ Item {
       if (root.usePreviewTheme)
         Qt.callLater(function() { previewTheme.focusCarousel() })
     }
+  }
+
+  Timer {
+    id: rustSearchTimer
+    interval: 250
+    repeat: false
+    onTriggered: root.runLiveRustSearch()
   }
 
   PanelWindow {
