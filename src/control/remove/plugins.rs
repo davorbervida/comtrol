@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
-use crate::system::plugins::{self, Plugin, PluginSource};
+use crate::control::system::plugins::{self, Plugin, PluginSource};
 
 /// Remove Omarchy shell plugins by id.
 ///
@@ -114,6 +114,6 @@ pub fn remove<S: AsRef<str>>(ids: &[S]) {
             .iter()
             .flat_map(|p| [p.id.as_str(), p.name.as_str()])
             .collect();
-        crate::remove::bindings::remove_related(&needles);
+        crate::control::remove::bindings::remove_related(&needles);
     }
 }

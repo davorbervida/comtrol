@@ -10,11 +10,27 @@ pub struct Package {
     pub installed: bool,
 }
 
+/// Search packages installed from pacman sync repositories (excludes AUR).
+///
+/// Empty `query` returns all local packages. Otherwise filters by name and
+/// description.
+pub fn local(query: &str) -> Vec<crate::control::system::packages::Package> {
+    let q = query.trim().to_lowercase();
+    crate::control::system::packages::load_all()
+        .into_iter()
+        .filter(|p| {
+            q.is_empty()
+                || p.name.to_lowercase().contains(&q)
+                || p.description.to_lowercase().contains(&q)
+        })
+        .collect()
+}
+
 /// Search pacman sync repositories.
 ///
 /// An empty `query` lists packages from the `omarchy` repository.
 /// A non-empty `query` searches all sync repos (name and description).
-pub fn search(query: &str) -> Vec<Package> {
+pub fn web(query: &str) -> Vec<Package> {
     if query.is_empty() {
         let Ok(installed_out) = Command::new("pacman").args(["-Qq"]).output() else {
             return Vec::new();

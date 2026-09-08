@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::process::Command;
 
-use crate::system::aurs;
+use crate::control::system::packages;
 
-/// Remove packages that were installed via the AUR.
+/// Remove packages that were installed via pacman sync repositories.
 ///
-/// Only names that appear in the installed foreign/AUR package list are
+/// Only names that appear in the installed native package list are
 /// uninstalled. Others are skipped. Prints the exact packages that will be
 /// removed before running `sudo pacman -R` (root password required).
 pub fn remove<S: AsRef<str>>(packages: &[S]) {
@@ -14,14 +14,14 @@ pub fn remove<S: AsRef<str>>(packages: &[S]) {
         return;
     }
 
-    let aur: HashSet<String> = aurs::load_all().into_iter().map(|p| p.name).collect();
+    let native: HashSet<String> = packages::load_all().into_iter().map(|p| p.name).collect();
 
     let mut to_remove: Vec<&str> = Vec::new();
     let mut skipped: Vec<&str> = Vec::new();
 
     for name in packages {
         let name = name.as_ref();
-        if aur.contains(name) {
+        if native.contains(name) {
             to_remove.push(name);
         } else {
             skipped.push(name);
@@ -30,17 +30,17 @@ pub fn remove<S: AsRef<str>>(packages: &[S]) {
 
     if !skipped.is_empty() {
         println!(
-            "Skipping (not an installed AUR package): {}",
+            "Skipping (not an installed pacman package): {}",
             skipped.join(", ")
         );
     }
 
     if to_remove.is_empty() {
-        println!("No AUR packages to remove.");
+        println!("No pacman packages to remove.");
         return;
     }
 
-    println!("The following AUR packages will be uninstalled:");
+    println!("The following pacman packages will be uninstalled:");
     for name in &to_remove {
         println!("  {name}");
     }
@@ -54,7 +54,7 @@ pub fn remove<S: AsRef<str>>(packages: &[S]) {
     match status {
         Ok(s) if s.success() => {
             println!("Done.");
-            crate::remove::bindings::remove_related(&to_remove);
+            crate::control::remove::bindings::remove_related(&to_remove);
         }
         Ok(s) => eprintln!("pacman exited with status: {s}"),
         Err(e) => eprintln!("Failed to run sudo pacman: {e}"),

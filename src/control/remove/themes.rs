@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
-use crate::system::themes::{self, Theme, ThemeSource};
+use crate::control::system::themes::{self, Theme, ThemeSource};
 
 /// Remove Omarchy themes by directory name.
 ///

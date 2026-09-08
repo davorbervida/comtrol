@@ -21,12 +21,23 @@ pub struct Theme {
     pub preview_image: String,
 }
 
+/// Search installed (user and first-party) Omarchy themes.
+///
+/// Empty `query` returns all local themes. Otherwise filters by name.
+pub fn local(query: &str) -> Vec<crate::control::system::themes::Theme> {
+    let q = query.trim().to_lowercase();
+    crate::control::system::themes::load_all()
+        .into_iter()
+        .filter(|t| q.is_empty() || t.name.to_lowercase().contains(&q))
+        .collect()
+}
+
 /// Search Omarchy themes on GitHub (repos with `preview.png`).
 ///
 /// Empty `query` returns the top 30 by stars. Non-empty filters the
 /// cached catalog by name, full name, description, and author.
 /// Results are cached under `~/.cache/comtrol/themes.json`.
-pub fn search(query: &str) -> Vec<Theme> {
+pub fn web(query: &str) -> Vec<Theme> {
     let mut themes = None;
 
     if let Some(path) = cache_path() {

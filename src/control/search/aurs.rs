@@ -15,10 +15,26 @@ pub struct AurPackage {
     pub installed: bool,
 }
 
+/// Search foreign packages installed from the AUR (or other non-sync sources).
+///
+/// Empty `query` returns all local AUR packages. Otherwise filters by name and
+/// description.
+pub fn local(query: &str) -> Vec<crate::control::system::aurs::AurPackage> {
+    let q = query.trim().to_lowercase();
+    crate::control::system::aurs::load_all()
+        .into_iter()
+        .filter(|p| {
+            q.is_empty()
+                || p.name.to_lowercase().contains(&q)
+                || p.description.to_lowercase().contains(&q)
+        })
+        .collect()
+}
+
 /// Search the Arch User Repository via the AUR RPC API.
 ///
 /// An empty `query` defaults to `"omarchy"`.
-pub fn search(query: &str) -> Vec<AurPackage> {
+pub fn web(query: &str) -> Vec<AurPackage> {
     let query = if query.trim().is_empty() {
         "omarchy"
     } else {

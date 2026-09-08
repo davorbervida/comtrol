@@ -22,12 +22,30 @@ pub struct Plugin {
     pub preview_image: Option<String>,
 }
 
+/// Search installed (user and first-party) Omarchy plugins.
+///
+/// Empty `query` returns all local plugins. Otherwise filters by id, name,
+/// description, and kinds.
+pub fn local(query: &str) -> Vec<crate::control::system::plugins::Plugin> {
+    let q = query.trim().to_lowercase();
+    crate::control::system::plugins::load_all()
+        .into_iter()
+        .filter(|p| {
+            q.is_empty()
+                || p.id.to_lowercase().contains(&q)
+                || p.name.to_lowercase().contains(&q)
+                || p.description.to_lowercase().contains(&q)
+                || p.kinds.iter().any(|k| k.to_lowercase().contains(&q))
+        })
+        .collect()
+}
+
 /// Search the Omarchy plugin catalog.
 ///
 /// Fetches `catalog.json` and install/stats data on every call.
 /// An empty `query` returns the full catalog; otherwise filters by
 /// id, name, description, author, category, and tags.
-pub fn search(query: &str) -> Vec<Plugin> {
+pub fn web(query: &str) -> Vec<Plugin> {
     let (catalog_out, stats_out) = std::thread::scope(|scope| {
         let catalog = scope.spawn(|| {
             Command::new("curl")

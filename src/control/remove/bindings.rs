@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::system::bindings::{self, Binding, BindingType};
+use crate::control::system::bindings::{self, Binding, BindingType};
 
 /// Remove bindings related to package names, web app names/URLs, or plugin ids.
 ///

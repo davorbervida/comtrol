@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::process::Command;
 
-use crate::system::web_apps::{self, WebApp, WebAppSource};
+use crate::control::system::web_apps::{self, WebApp, WebAppSource};
 
 /// Remove Omarchy web app desktop launchers by name.
 ///
@@ -146,6 +146,6 @@ pub fn remove<S: AsRef<str>>(names: &[S]) {
                 needles.push(url.clone());
             }
         }
-        crate::remove::bindings::remove_related(&needles);
+        crate::control::remove::bindings::remove_related(&needles);
     }
 }
