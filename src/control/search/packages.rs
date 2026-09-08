@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 use std::process::Command;
 
-#[derive(Debug, Clone)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -14,23 +16,30 @@ pub struct Package {
 ///
 /// Empty `query` returns all local packages. Otherwise filters by name and
 /// description.
-pub fn local(query: &str) -> Vec<crate::control::system::packages::Package> {
+/// Returns a JSON array.
+pub fn local(query: &str) -> String {
     let q = query.trim().to_lowercase();
-    crate::control::system::packages::load_all()
+    let packages: Vec<_> = crate::control::system::packages::collect()
         .into_iter()
         .filter(|p| {
             q.is_empty()
                 || p.name.to_lowercase().contains(&q)
                 || p.description.to_lowercase().contains(&q)
         })
-        .collect()
+        .collect();
+    super::to_json(&packages)
 }
 
 /// Search pacman sync repositories.
 ///
 /// An empty `query` lists packages from the `omarchy` repository.
 /// A non-empty `query` searches all sync repos (name and description).
-pub fn web(query: &str) -> Vec<Package> {
+/// Returns a JSON array.
+pub fn web(query: &str) -> String {
+    super::to_json(&web_items(query))
+}
+
+fn web_items(query: &str) -> Vec<Package> {
     if query.is_empty() {
         let Ok(installed_out) = Command::new("pacman").args(["-Qq"]).output() else {
             return Vec::new();

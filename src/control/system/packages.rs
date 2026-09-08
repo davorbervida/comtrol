@@ -3,13 +3,16 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InstallReason {
     Explicit,
     Dependency,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -17,8 +20,12 @@ pub struct Package {
     pub reason: InstallReason,
 }
 
-/// Load packages installed from pacman sync repositories (excludes AUR/foreign).
-pub fn load_all() -> Vec<Package> {
+/// Load packages installed from pacman sync repositories (excludes AUR/foreign) as JSON.
+pub fn load_all() -> String {
+    super::to_json(&collect())
+}
+
+pub(crate) fn collect() -> Vec<Package> {
     let Ok(output) = Command::new("pacman").args(["-Qnq"]).output() else {
         return Vec::new();
     };

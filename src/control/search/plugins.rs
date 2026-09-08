@@ -1,8 +1,9 @@
 use std::process::Command;
 
+use serde::Serialize;
 use serde_json::Value;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Plugin {
     pub id: String,
     pub name: String,
@@ -26,9 +27,10 @@ pub struct Plugin {
 ///
 /// Empty `query` returns all local plugins. Otherwise filters by id, name,
 /// description, and kinds.
-pub fn local(query: &str) -> Vec<crate::control::system::plugins::Plugin> {
+/// Returns a JSON array.
+pub fn local(query: &str) -> String {
     let q = query.trim().to_lowercase();
-    crate::control::system::plugins::load_all()
+    let plugins: Vec<_> = crate::control::system::plugins::collect()
         .into_iter()
         .filter(|p| {
             q.is_empty()
@@ -37,7 +39,8 @@ pub fn local(query: &str) -> Vec<crate::control::system::plugins::Plugin> {
                 || p.description.to_lowercase().contains(&q)
                 || p.kinds.iter().any(|k| k.to_lowercase().contains(&q))
         })
-        .collect()
+        .collect();
+    super::to_json(&plugins)
 }
 
 /// Search the Omarchy plugin catalog.
@@ -45,7 +48,12 @@ pub fn local(query: &str) -> Vec<crate::control::system::plugins::Plugin> {
 /// Fetches `catalog.json` and install/stats data on every call.
 /// An empty `query` returns the full catalog; otherwise filters by
 /// id, name, description, author, category, and tags.
-pub fn web(query: &str) -> Vec<Plugin> {
+/// Returns a JSON array.
+pub fn web(query: &str) -> String {
+    super::to_json(&web_items(query))
+}
+
+fn web_items(query: &str) -> Vec<Plugin> {
     let (catalog_out, stats_out) = std::thread::scope(|scope| {
         let catalog = scope.spawn(|| {
             Command::new("curl")

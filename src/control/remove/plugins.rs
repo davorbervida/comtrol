@@ -19,7 +19,7 @@ pub fn remove<S: AsRef<str>>(ids: &[S]) {
     }
 
     let mut by_id: HashMap<String, Plugin> = HashMap::new();
-    for plugin in plugins::load_all() {
+    for plugin in plugins::collect() {
         by_id.insert(plugin.id.clone(), plugin);
     }
 

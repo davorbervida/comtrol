@@ -20,7 +20,7 @@ pub fn remove<S: AsRef<str>>(names: &[S]) {
     }
 
     let mut by_name: HashMap<String, Vec<WebApp>> = HashMap::new();
-    for app in web_apps::load_all() {
+    for app in web_apps::collect() {
         by_name.entry(app.name.clone()).or_default().push(app);
     }
 

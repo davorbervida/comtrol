@@ -3,13 +3,16 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InstallReason {
     Explicit,
     Dependency,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AurPackage {
     pub name: String,
     pub version: String,
@@ -17,8 +20,12 @@ pub struct AurPackage {
     pub reason: InstallReason,
 }
 
-/// Load foreign packages installed from the AUR (or other non-sync sources).
-pub fn load_all() -> Vec<AurPackage> {
+/// Load foreign packages installed from the AUR (or other non-sync sources) as JSON.
+pub fn load_all() -> String {
+    super::to_json(&collect())
+}
+
+pub(crate) fn collect() -> Vec<AurPackage> {
     let Ok(output) = Command::new("pacman").args(["-Qmq"]).output() else {
         return Vec::new();
     };

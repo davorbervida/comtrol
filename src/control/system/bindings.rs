@@ -2,14 +2,17 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BindingType {
     Bind,
     Unbind,
     Toggle,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Binding {
     pub keys: String,
     pub action: String,
@@ -18,8 +21,12 @@ pub struct Binding {
     pub r#type: BindingType,
 }
 
-/// Load and merge bindings from all known config files.
-pub fn load_all() -> Vec<Binding> {
+/// Load and merge bindings from all known config files as JSON.
+pub fn load_all() -> String {
+    super::to_json(&collect())
+}
+
+pub(crate) fn collect() -> Vec<Binding> {
     config_paths()
         .iter()
         .flat_map(|path| extract_bindings(path))

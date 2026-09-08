@@ -14,7 +14,7 @@ pub fn remove<S: AsRef<str>>(packages: &[S]) {
         return;
     }
 
-    let native: HashSet<String> = packages::load_all().into_iter().map(|p| p.name).collect();
+    let native: HashSet<String> = packages::collect().into_iter().map(|p| p.name).collect();
 
     let mut to_remove: Vec<&str> = Vec::new();
     let mut skipped: Vec<&str> = Vec::new();

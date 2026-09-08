@@ -2,13 +2,16 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ThemeSource {
     FirstParty,
     User,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Theme {
     pub name: String,
     pub path: String,
@@ -17,8 +20,12 @@ pub struct Theme {
     pub source: ThemeSource,
 }
 
-/// Load user-installed and first-party Omarchy themes.
-pub fn load_all() -> Vec<Theme> {
+/// Load user-installed and first-party Omarchy themes as JSON.
+pub fn load_all() -> String {
+    super::to_json(&collect())
+}
+
+pub(crate) fn collect() -> Vec<Theme> {
     let home = env::var("HOME").expect("Home is not set");
     let omarchy = env::var("OMARCHY_PATH").unwrap_or_else(|_| "/usr/share/omarchy".to_string());
 

@@ -2,13 +2,16 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PluginSource {
     FirstParty,
     User,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Plugin {
     pub id: String,
     pub name: String,
@@ -20,8 +23,12 @@ pub struct Plugin {
     pub source: PluginSource,
 }
 
-/// Load user-installed and first-party Omarchy plugins.
-pub fn load_all() -> Vec<Plugin> {
+/// Load user-installed and first-party Omarchy plugins as JSON.
+pub fn load_all() -> String {
+    super::to_json(&collect())
+}
+
+pub(crate) fn collect() -> Vec<Plugin> {
     let mut plugins = load_user();
     plugins.extend(load_first_party());
     plugins

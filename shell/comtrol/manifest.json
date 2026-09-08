@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "comtrol",
+  "name": "cOMtrol",
+  "version": "0.1.0",
+  "author": "davor",
+  "license": "MIT",
+  "description": "Omarchy control menu for themes, plugins, packages, and AUR",
+  "kinds": ["menu"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "menu": "Menu.qml"
+  }
+}

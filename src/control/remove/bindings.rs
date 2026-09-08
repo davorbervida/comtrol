@@ -25,7 +25,7 @@ pub fn remove_related<S: AsRef<str>>(needles: &[S]) {
     let mut actions = Vec::new();
     let mut seen = HashSet::new();
 
-    for binding in bindings::load_all() {
+    for binding in bindings::collect() {
         if binding.r#type == BindingType::Unbind || binding.action.is_empty() {
             continue;
         }
@@ -81,7 +81,7 @@ pub fn remove<S: AsRef<str>>(actions: &[S]) {
     }
 
     let mut by_action: HashMap<String, Vec<Binding>> = HashMap::new();
-    for binding in bindings::load_all() {
+    for binding in bindings::collect() {
         if binding.r#type == BindingType::Unbind || binding.action.is_empty() {
             continue;
         }

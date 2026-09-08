@@ -4,13 +4,14 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
 use serde_json::{Value, json};
 
 const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 const SEARCH_PAGES: u32 = 3;
 const TOP_N: usize = 30;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Theme {
     pub name: String,
     pub full_name: String,
@@ -24,12 +25,14 @@ pub struct Theme {
 /// Search installed (user and first-party) Omarchy themes.
 ///
 /// Empty `query` returns all local themes. Otherwise filters by name.
-pub fn local(query: &str) -> Vec<crate::control::system::themes::Theme> {
+/// Returns a JSON array.
+pub fn local(query: &str) -> String {
     let q = query.trim().to_lowercase();
-    crate::control::system::themes::load_all()
+    let themes: Vec<_> = crate::control::system::themes::collect()
         .into_iter()
         .filter(|t| q.is_empty() || t.name.to_lowercase().contains(&q))
-        .collect()
+        .collect();
+    super::to_json(&themes)
 }
 
 /// Search Omarchy themes on GitHub (repos with `preview.png`).
@@ -37,7 +40,12 @@ pub fn local(query: &str) -> Vec<crate::control::system::themes::Theme> {
 /// Empty `query` returns the top 30 by stars. Non-empty filters the
 /// cached catalog by name, full name, description, and author.
 /// Results are cached under `~/.cache/comtrol/themes.json`.
-pub fn web(query: &str) -> Vec<Theme> {
+/// Returns a JSON array.
+pub fn web(query: &str) -> String {
+    super::to_json(&web_items(query))
+}
+
+fn web_items(query: &str) -> Vec<Theme> {
     let mut themes = None;
 
     if let Some(path) = cache_path() {

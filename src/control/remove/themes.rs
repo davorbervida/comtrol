@@ -18,7 +18,7 @@ pub fn remove<S: AsRef<str>>(names: &[S]) {
     }
 
     let mut by_name: HashMap<String, Theme> = HashMap::new();
-    for theme in themes::load_all() {
+    for theme in themes::collect() {
         // Prefer the user copy when the same name exists in both places.
         if theme.source == ThemeSource::User || !by_name.contains_key(&theme.name) {
             by_name.insert(theme.name.clone(), theme);

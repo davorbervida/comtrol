@@ -1,14 +1,15 @@
-use crate::control::system::bindings::{self, Binding, BindingType};
+use crate::control::system::bindings::{self, BindingType};
 
 /// Search installed Hyprland/Omarchy keybindings.
 ///
 /// An empty `query` returns all bind/toggle entries. Otherwise matches against
 /// keys, action, and description (case-insensitive; spaces ignored; `_` and
 /// `-` treated the same), so both `"SUPER + SPACE"` and `"omarchy_menu"` work.
-pub fn search(query: &str) -> Vec<Binding> {
+/// Returns a JSON array.
+pub fn search(query: &str) -> String {
     let q = normalize(query);
 
-    bindings::load_all()
+    let bindings: Vec<_> = bindings::collect()
         .into_iter()
         .filter(|b| b.r#type != BindingType::Unbind)
         .filter(|b| {
@@ -17,7 +18,8 @@ pub fn search(query: &str) -> Vec<Binding> {
                 || normalize(&b.action).contains(&q)
                 || normalize(&b.description).contains(&q)
         })
-        .collect()
+        .collect();
+    super::to_json(&bindings)
 }
 
 fn normalize(s: &str) -> String {

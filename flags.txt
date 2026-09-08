@@ -1,0 +1,31 @@
+cOMtrol — Omarchy control CLI
+
+Usage:
+  cOMtrol -s <domain> [-l|-w] [query...]
+  cOMtrol -v <domain>
+  cOMtrol -r <domain> <name...>
+
+Actions:
+  -s, --search          Search (JSON stdout)
+  -v, --view, --system  List installed / system state (JSON stdout)
+  -r, --remove          Remove by name/id
+
+Domains:
+  -theme, -plugin, -package, -aur, -binding, -webapp
+
+Search mode:
+  -l, --local           Installed / local
+  -w, --web             Remote catalog (default for -s)
+
+Examples:
+  cOMtrol -s -aur -l reall good
+  cOMtrol -s -theme -w
+  cOMtrol -v -plugin
+  cOMtrol -r -theme momentum
+  cOMtrol -r -theme -momentum
+
+Notes:
+  - Query/name args can also be written with a leading dash (e.g. -momentum → momentum).
+  - Search (-s) and view (-v) print JSON arrays to stdout.
+  - Bindings search ignores -l/-w (single search endpoint).
+  - Webapps have no search; use -v -webapp or -r -webapp <name>.

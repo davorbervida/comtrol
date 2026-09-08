@@ -1,195 +1,194 @@
 mod control;
 
-use control::{search, system};
+use control::{remove, search, system};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-
-    if args.first().is_some_and(|a| a == "themes") {
-        match args.get(1).map(String::as_str) {
-            Some("local") => run_theme_local_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            Some("web") => run_theme_web_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            _ => run_theme_web_search(&args.get(1..).unwrap_or(&[]).join(" ")),
-        }
+    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
+        print_usage();
         return;
     }
 
-    if args.first().is_some_and(|a| a == "plugins") {
-        match args.get(1).map(String::as_str) {
-            Some("local") => run_plugin_local_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            Some("web") => run_plugin_web_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            _ => run_plugin_web_search(&args.get(1..).unwrap_or(&[]).join(" ")),
+    match run(&args) {
+        Ok(()) => {}
+        Err(err) => {
+            eprintln!("error: {err}");
+            eprintln!();
+            print_usage();
+            std::process::exit(1);
         }
-        return;
-    }
-
-    if args.first().is_some_and(|a| a == "packages") {
-        match args.get(1).map(String::as_str) {
-            Some("local") => run_package_local_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            Some("web") => run_package_web_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            _ => run_package_web_search(&args.get(1..).unwrap_or(&[]).join(" ")),
-        }
-        return;
-    }
-
-    if args.first().is_some_and(|a| a == "aurs") {
-        match args.get(1).map(String::as_str) {
-            Some("local") => run_aur_local_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            Some("web") => run_aur_web_search(&args.get(2..).unwrap_or(&[]).join(" ")),
-            _ => run_aur_web_search(&args.get(1..).unwrap_or(&[]).join(" ")),
-        }
-        return;
-    }
-
-    let query = args.join(" ");
-
-    if !args.is_empty() {
-        run_plugin_web_search(&query);
-        return;
-    }
-
-    println!("Plugin search — type a query (empty = all, q = quit)");
-    loop {
-        eprint!("> ");
-        let mut input = String::new();
-        if std::io::stdin().read_line(&mut input).is_err() {
-            break;
-        }
-        let query = input.trim();
-        if query.eq_ignore_ascii_case("q") || query.eq_ignore_ascii_case("quit") {
-            break;
-        }
-        run_plugin_web_search(query);
     }
 }
 
-fn run_aur_local_search(query: &str) {
-    let packages = search::aurs::local(query);
-    println!("{} result(s)\n", packages.len());
-    for p in &packages {
-        let reason = match p.reason {
-            system::aurs::InstallReason::Explicit => "explicit",
-            system::aurs::InstallReason::Dependency => "dependency",
-        };
-        println!("{}  {}  ({reason})", p.name, p.version);
-        if !p.description.is_empty() {
-            println!("  {}", p.description);
+fn run(args: &[String]) -> Result<(), String> {
+    let mut action: Option<Action> = None;
+    let mut domain: Option<Domain> = None;
+    let mut mode: Option<Mode> = None;
+    let mut values: Vec<String> = Vec::new();
+
+    for arg in args {
+        match arg.as_str() {
+            "-s" | "--search" => set_once(&mut action, Action::Search, "action")?,
+            "-r" | "--remove" => set_once(&mut action, Action::Remove, "action")?,
+            "-v" | "--view" | "--system" => set_once(&mut action, Action::View, "action")?,
+
+            "-l" | "--local" => set_once(&mut mode, Mode::Local, "mode")?,
+            "-w" | "--web" => set_once(&mut mode, Mode::Web, "mode")?,
+
+            "-theme" | "-themes" | "--theme" | "--themes" => {
+                set_once(&mut domain, Domain::Themes, "domain")?
+            }
+            "-plugin" | "-plugins" | "--plugin" | "--plugins" => {
+                set_once(&mut domain, Domain::Plugins, "domain")?
+            }
+            "-package" | "-packages" | "-pkg" | "--package" | "--packages" => {
+                set_once(&mut domain, Domain::Packages, "domain")?
+            }
+            "-aur" | "-aurs" | "--aur" | "--aurs" => {
+                set_once(&mut domain, Domain::Aurs, "domain")?
+            }
+            "-binding" | "-bindings" | "-bind" | "--binding" | "--bindings" => {
+                set_once(&mut domain, Domain::Bindings, "domain")?
+            }
+            "-webapp" | "-webapps" | "-web-apps" | "--webapp" | "--webapps" => {
+                set_once(&mut domain, Domain::WebApps, "domain")?
+            }
+
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
+
+            other if other.starts_with('-') => {
+                // Allow `-momentum` style values from examples like: -r -theme -momentum
+                let value = other.trim_start_matches('-');
+                if value.is_empty() {
+                    return Err(format!("unknown flag: {other}"));
+                }
+                values.push(value.to_string());
+            }
+            other => values.push(other.to_string()),
         }
     }
-    println!();
+
+    let action = action.ok_or("missing action (-s search, -r remove, -v view)")?;
+    let domain = domain.ok_or(
+        "missing domain (-theme, -plugin, -package, -aur, -binding, -webapp)",
+    )?;
+
+    match action {
+        Action::Search => {
+            let query = values.join(" ");
+            let mode = mode.unwrap_or(Mode::Web);
+            let json = match (domain, mode) {
+                (Domain::Themes, Mode::Local) => search::themes::local(&query),
+                (Domain::Themes, Mode::Web) => search::themes::web(&query),
+                (Domain::Plugins, Mode::Local) => search::plugins::local(&query),
+                (Domain::Plugins, Mode::Web) => search::plugins::web(&query),
+                (Domain::Packages, Mode::Local) => search::packages::local(&query),
+                (Domain::Packages, Mode::Web) => search::packages::web(&query),
+                (Domain::Aurs, Mode::Local) => search::aurs::local(&query),
+                (Domain::Aurs, Mode::Web) => search::aurs::web(&query),
+                (Domain::Bindings, _) => search::bindings::search(&query),
+                (Domain::WebApps, _) => {
+                    return Err("search is not available for webapps (use -v -webapp)".into());
+                }
+            };
+            println!("{json}");
+        }
+        Action::View => {
+            if mode.is_some() {
+                return Err("view (-v) does not take -l/-w".into());
+            }
+            let json = match domain {
+                Domain::Themes => system::themes::load_all(),
+                Domain::Plugins => system::plugins::load_all(),
+                Domain::Packages => system::packages::load_all(),
+                Domain::Aurs => system::aurs::load_all(),
+                Domain::Bindings => system::bindings::load_all(),
+                Domain::WebApps => system::web_apps::load_all(),
+            };
+            println!("{json}");
+        }
+        Action::Remove => {
+            if mode.is_some() {
+                return Err("remove (-r) does not take -l/-w".into());
+            }
+            if values.is_empty() {
+                return Err("remove requires at least one name/id (e.g. -r -theme momentum)".into());
+            }
+            match domain {
+                Domain::Themes => remove::themes::remove(&values),
+                Domain::Plugins => remove::plugins::remove(&values),
+                Domain::Packages => remove::packages::remove(&values),
+                Domain::Aurs => remove::aurs::remove(&values),
+                Domain::Bindings => remove::bindings::remove(&values),
+                Domain::WebApps => remove::web_apps::remove(&values),
+            }
+        }
+    }
+
+    Ok(())
 }
 
-fn run_aur_web_search(query: &str) {
-    let packages = search::aurs::web(query);
-    println!("{} result(s)\n", packages.len());
-    for p in &packages {
-        let flag = if p.installed { " [installed]" } else { "" };
-        println!(
-            "{}  {}{flag}  votes={} popularity={:.2}",
-            p.name, p.version, p.votes, p.popularity
-        );
-        if !p.description.is_empty() {
-            println!("  {}", p.description);
-        }
-        if !p.url.is_empty() {
-            println!("  {}", p.url);
-        }
+fn set_once<T>(slot: &mut Option<T>, value: T, label: &str) -> Result<(), String> {
+    if slot.is_some() {
+        return Err(format!("duplicate {label}"));
     }
-    println!();
+    *slot = Some(value);
+    Ok(())
 }
 
-fn run_package_local_search(query: &str) {
-    let packages = search::packages::local(query);
-    println!("{} result(s)\n", packages.len());
-    for p in &packages {
-        let reason = match p.reason {
-            system::packages::InstallReason::Explicit => "explicit",
-            system::packages::InstallReason::Dependency => "dependency",
-        };
-        println!("{}  {}  ({reason})", p.name, p.version);
-        if !p.description.is_empty() {
-            println!("  {}", p.description);
-        }
-    }
-    println!();
+#[derive(Clone, Copy)]
+enum Action {
+    Search,
+    Remove,
+    View,
 }
 
-fn run_package_web_search(query: &str) {
-    let packages = search::packages::web(query);
-    println!("{} result(s)\n", packages.len());
-    for p in &packages {
-        let flag = if p.installed { " [installed]" } else { "" };
-        println!("{}/{}  {}{flag}", p.repo, p.name, p.version);
-        if !p.description.is_empty() {
-            println!("  {}", p.description);
-        }
-    }
-    println!();
+#[derive(Clone, Copy)]
+enum Domain {
+    Themes,
+    Plugins,
+    Packages,
+    Aurs,
+    Bindings,
+    WebApps,
 }
 
-fn run_plugin_local_search(query: &str) {
-    let plugins = search::plugins::local(query);
-    println!("{} result(s)\n", plugins.len());
-    for p in &plugins {
-        let kind = match p.source {
-            system::plugins::PluginSource::User => "user",
-            system::plugins::PluginSource::FirstParty => "preinstalled",
-        };
-        println!("{}  —  {} ({kind})  {}", p.id, p.name, p.path);
-        if !p.description.is_empty() {
-            println!("  {}", p.description);
-        }
-        if let Some(preview) = &p.preview {
-            println!("  {preview}");
-        }
-    }
-    println!();
+#[derive(Clone, Copy)]
+enum Mode {
+    Local,
+    Web,
 }
 
-fn run_plugin_web_search(query: &str) {
-    let plugins = search::plugins::web(query);
-    println!("{} result(s)\n", plugins.len());
-    for p in &plugins {
-        println!(
-            "{}  —  {}  [{}]  hearts={} views={} copies={} stars={}",
-            p.id, p.name, p.category, p.hearts, p.views, p.copies, p.stars
-        );
-        if !p.description.is_empty() {
-            println!("  {}", p.description);
-        }
-        if let Some(url) = &p.preview_image {
-            println!("  {url}");
-        }
-    }
-    println!();
-}
+fn print_usage() {
+    eprintln!(
+        "\
+cOMtrol — Omarchy control CLI
 
-fn run_theme_local_search(query: &str) {
-    let themes = search::themes::local(query);
-    println!("{} result(s)\n", themes.len());
-    for t in &themes {
-        let kind = match t.source {
-            system::themes::ThemeSource::User => "user",
-            system::themes::ThemeSource::FirstParty => "preinstalled",
-        };
-        println!("{}  —  {} ({kind})", t.name, t.path);
-        if let Some(preview) = &t.preview {
-            println!("  {preview}");
-        }
-    }
-    println!();
-}
+Usage:
+  cOMtrol -s <domain> [-l|-w] [query...]
+  cOMtrol -v <domain>
+  cOMtrol -r <domain> <name...>
 
-fn run_theme_web_search(query: &str) {
-    let themes = search::themes::web(query);
-    println!("{} result(s)\n", themes.len());
-    for t in &themes {
-        println!("{}  —  {}  stars={}", t.full_name, t.name, t.stars);
-        if !t.description.is_empty() {
-            println!("  {}", t.description);
-        }
-        println!("  {}", t.repo);
-        println!("  {}", t.preview_image);
-    }
-    println!();
+Actions:
+  -s, --search          Search (JSON stdout)
+  -v, --view, --system  List installed / system state (JSON stdout)
+  -r, --remove          Remove by name/id
+
+Domains:
+  -theme, -plugin, -package, -aur, -binding, -webapp
+
+Search mode:
+  -l, --local           Installed / local
+  -w, --web             Remote catalog (default for -s)
+
+Examples:
+  cOMtrol -s -aur -l reall good
+  cOMtrol -s -theme -w
+  cOMtrol -v -plugin
+  cOMtrol -r -theme momentum
+  cOMtrol -r -theme -momentum"
+    );
 }

@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::process::Command;
 
+use serde::Serialize;
 use serde_json::Value;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AurPackage {
     pub name: String,
     pub version: String,
@@ -19,22 +20,29 @@ pub struct AurPackage {
 ///
 /// Empty `query` returns all local AUR packages. Otherwise filters by name and
 /// description.
-pub fn local(query: &str) -> Vec<crate::control::system::aurs::AurPackage> {
+/// Returns a JSON array.
+pub fn local(query: &str) -> String {
     let q = query.trim().to_lowercase();
-    crate::control::system::aurs::load_all()
+    let packages: Vec<_> = crate::control::system::aurs::collect()
         .into_iter()
         .filter(|p| {
             q.is_empty()
                 || p.name.to_lowercase().contains(&q)
                 || p.description.to_lowercase().contains(&q)
         })
-        .collect()
+        .collect();
+    super::to_json(&packages)
 }
 
 /// Search the Arch User Repository via the AUR RPC API.
 ///
 /// An empty `query` defaults to `"omarchy"`.
-pub fn web(query: &str) -> Vec<AurPackage> {
+/// Returns a JSON array.
+pub fn web(query: &str) -> String {
+    super::to_json(&web_items(query))
+}
+
+fn web_items(query: &str) -> Vec<AurPackage> {
     let query = if query.trim().is_empty() {
         "omarchy"
     } else {
