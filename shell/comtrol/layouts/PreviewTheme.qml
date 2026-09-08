@@ -78,16 +78,15 @@ Item {
       .replace(/\b\w/g, function(m) { return m.toUpperCase() })
   }
 
+  // Title-only substring match (case-insensitive). "ma" matches "Matte", not letter-by-letter fuzz.
   function itemMatches(index) {
     if (index < 0 || index >= imageArray.length)
       return false
-    var needle = String(root.filterText || "").toLowerCase()
+    var needle = String(root.filterText || "").trim().toLowerCase().replace(/[-_]+/g, " ")
     if (!needle)
       return true
-    var name = String(imageArray[index].name || "")
-    var label = labelForName(name)
-    return name.toLowerCase().indexOf(needle) !== -1
-      || label.toLowerCase().indexOf(needle) !== -1
+    var title = labelForName(imageArray[index].name || "").toLowerCase()
+    return title.indexOf(needle) !== -1
   }
 
   function firstMatchingIndex() {
