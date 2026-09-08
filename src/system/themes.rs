@@ -1,5 +1,12 @@
 use std::env;
 use std::fs;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeSource {
+    FirstParty,
+    User,
+}
 
 #[derive(Debug, Clone)]
 pub struct Theme {
@@ -7,14 +14,27 @@ pub struct Theme {
     pub path: String,
     pub preview: Option<String>,
     pub ansi_colors: [Option<String>; 16],
+    pub source: ThemeSource,
 }
 
-/// Load installed Omarchy themes from ~/.config/omarchy/themes.
+/// Load user-installed and first-party Omarchy themes.
 pub fn load_all() -> Vec<Theme> {
     let home = env::var("HOME").expect("Home is not set");
-    let themes_dir = format!("{home}/.config/omarchy/themes");
+    let omarchy = env::var("OMARCHY_PATH").unwrap_or_else(|_| "/usr/share/omarchy".to_string());
 
-    let Ok(entries) = fs::read_dir(&themes_dir) else {
+    let mut themes = collect_from(
+        &PathBuf::from(format!("{home}/.config/omarchy/themes")),
+        ThemeSource::User,
+    );
+    themes.extend(collect_from(
+        &PathBuf::from(format!("{omarchy}/themes")),
+        ThemeSource::FirstParty,
+    ));
+    themes
+}
+
+fn collect_from(dir: &Path, source: ThemeSource) -> Vec<Theme> {
+    let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
 
@@ -95,6 +115,7 @@ pub fn load_all() -> Vec<Theme> {
             path: path_str,
             preview,
             ansi_colors,
+            source,
         });
     }
 
