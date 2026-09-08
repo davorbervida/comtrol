@@ -34,6 +34,7 @@ Item {
   signal themeRemoveRequested(var theme)
   signal filterChanged(string text)
   signal indexChanged(int index)
+  signal dismissRequested()
 
   readonly property var imageArray: {
     var out = []
@@ -239,10 +240,7 @@ Item {
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) {
-          if (root.filterText)
-            root.updateFilter("")
-          else
-            root.backRequested()
+          root.dismissRequested()
           event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
           root.activateSelected()
@@ -252,6 +250,9 @@ Item {
           event.accepted = true
         } else if (Util.editsFilter(event, root.filterText)) {
           root.updateFilter(Util.editedFilter(event, root.filterText))
+          event.accepted = true
+        } else if (event.key === Qt.Key_Backspace) {
+          root.backRequested()
           event.accepted = true
         } else if (event.key === Qt.Key_Left || (event.key === Qt.Key_Tab && event.modifiers & Qt.ShiftModifier) || event.key === Qt.Key_Backtab) {
           root.selectAdjacent(-1)

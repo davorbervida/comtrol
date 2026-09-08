@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 
-// Three-column plugin catalog grid for Plugins → Add.
+// Plugin catalog grid for Plugins → Add — fixed preview size, as many columns as fit.
 Item {
   id: root
 
@@ -18,16 +18,23 @@ Item {
   property color unselectedBorder: Color.menu.border
   property color selectedBackground: Color.menu.selectedBackground
 
-  property int columns: 3
-  property int gridGap: Style.space(16)
-  property int previewHeight: Style.space(140)
+  property int gridGap: Style.space(14)
   property int cellPad: Style.space(12)
+  property int previewWidth: 300
+  property int previewHeight: 150
+  property int authorBottomMargin: Style.space(12)
+  property int columns: 3
+  readonly property int textBlockHeight: Style.space(132) + authorBottomMargin
+  readonly property int cardInnerWidth: previewWidth + cellPad * 2
+  readonly property int cardInnerHeight: previewHeight + cellPad * 2 + textBlockHeight
   readonly property int bottomChromeHeight: filterText ? Style.space(96) : Style.space(64)
+  readonly property int gridContentWidth: columns * (cardInnerWidth + gridGap)
 
   signal backRequested()
   signal pluginActivated(var plugin)
   signal filterChanged(string text)
   signal indexChanged(int index)
+  signal dismissRequested()
 
   readonly property var filteredPlugins: {
     var out = []
@@ -36,13 +43,20 @@ Item {
     for (var i = 0; i < list.length; i++) {
       var p = list[i] || {}
       if (needle) {
+        var tagStr = ""
+        var tags = p.tags || []
+        if (tags && tags.length !== undefined) {
+          for (var ti = 0; ti < tags.length; ti++)
+            tagStr += " " + tags[ti]
+        }
         var hay = [
           p.name || "",
           p.id || "",
           p.author || "",
           p.repo || "",
           p.version || "",
-          p.description || ""
+          p.description || "",
+          tagStr
         ].join(" ").toLowerCase()
         if (hay.indexOf(needle) < 0)
           continue
@@ -138,26 +152,25 @@ Item {
 
     GridView {
       id: grid
-      anchors.left: parent.left
-      anchors.right: parent.right
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       anchors.bottomMargin: root.bottomChromeHeight
+      anchors.horizontalCenter: parent.horizontalCenter
+      width: Math.min(parent.width, root.gridContentWidth)
       clip: true
       focus: true
-      cellWidth: Math.floor(width / root.columns)
-      cellHeight: root.previewHeight + Style.space(112)
+      cellWidth: root.cardInnerWidth + root.gridGap
+      cellHeight: root.cardInnerHeight + root.gridGap
       model: root.filteredPlugins
       boundsBehavior: Flickable.StopAtBounds
       keyNavigationEnabled: false
+      leftMargin: 0
+      rightMargin: 0
 
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) {
-          if (root.filterText)
-            root.updateFilter("")
-          else
-            root.backRequested()
+          root.dismissRequested()
           event.accepted = true
         } else if (event.key === Qt.Key_Left) {
           root.selectDelta(-1)
@@ -174,14 +187,11 @@ Item {
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
           root.activateSelected()
           event.accepted = true
-        } else if (event.key === Qt.Key_Backspace) {
-          if (root.filterText)
-            root.updateFilter(root.filterText.slice(0, -1))
-          else
-            root.backRequested()
-          event.accepted = true
         } else if (Util.editsFilter(event, root.filterText)) {
           root.updateFilter(Util.editedFilter(event, root.filterText))
+          event.accepted = true
+        } else if (event.key === Qt.Key_Backspace) {
+          root.backRequested()
           event.accepted = true
         } else if (event.text && event.text.length === 1
                    && event.text.charCodeAt(0) >= 32
@@ -203,10 +213,27 @@ Item {
         readonly property var plugin: modelData || ({})
         readonly property bool selected: root.selectedIndex === index
         readonly property string preview: String(plugin.preview || plugin.preview_image || "")
+        readonly property string tagsText: {
+          var tags = plugin.tags || []
+          var parts = []
+          if (tags && tags.length !== undefined) {
+            for (var i = 0; i < tags.length; i++)
+              parts.push(String(tags[i]))
+          }
+          return parts.join(" · ")
+        }
+        readonly property string statsText: {
+          var hearts = Number(plugin.hearts || 0)
+          var stars = Number(plugin.stars || 0)
+          return "♥ " + hearts + "   ★ " + stars
+        }
 
         Rectangle {
-          anchors.fill: parent
-          anchors.margins: root.gridGap / 2
+          width: root.cardInnerWidth
+          height: root.cardInnerHeight
+          anchors.horizontalCenter: parent.horizontalCenter
+          anchors.top: parent.top
+          anchors.topMargin: root.gridGap / 2
           radius: Style.cornerRadius
           color: cell.selected ? root.selectedBackground : root.cardBackground
           border.width: cell.selected ? Math.max(2, Style.space(2)) : 1
@@ -214,12 +241,16 @@ Item {
 
           Column {
             anchors.fill: parent
-            anchors.margins: root.cellPad
-            spacing: Style.space(8)
+            anchors.leftMargin: root.cellPad
+            anchors.rightMargin: root.cellPad
+            anchors.topMargin: root.cellPad
+            anchors.bottomMargin: root.cellPad + root.authorBottomMargin
+            spacing: Style.space(6)
 
             Item {
-              width: parent.width
+              width: root.previewWidth
               height: root.previewHeight
+              anchors.horizontalCenter: parent.horizontalCenter
 
               Rectangle {
                 anchors.fill: parent
@@ -273,12 +304,34 @@ Item {
             Text {
               width: parent.width
               textFormat: Text.PlainText
+              text: cell.tagsText
+              visible: text.length > 0
+              color: root.foreground
+              opacity: 0.62
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: cell.statsText
+              color: root.foreground
+              opacity: 0.72
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
               text: String(cell.plugin.repo || "")
               visible: text.length > 0
               color: root.foreground
               opacity: 0.55
               font.pixelSize: Style.font.caption
               elide: Text.ElideMiddle
+              bottomPadding: root.authorBottomMargin
             }
           }
 

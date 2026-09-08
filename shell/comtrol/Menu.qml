@@ -26,19 +26,28 @@ Item {
   property var resultRows: []
   property var themeResults: []
   property var pluginResults: []
+  property var selectedPlugin: null
+  property var installedPluginIds: ({})
   property string pendingDomain: ""
   property string pendingMode: ""
   property int searchSerial: 0
+  property int installedPluginsSerial: 0
 
   readonly property bool usePreviewTheme: showingResults
     && !loading
     && pendingDomain === "themes"
     && (pendingMode === "local" || pendingMode === "web")
+  readonly property bool usePluginDetail: showingResults
+    && !loading
+    && pendingDomain === "plugins"
+    && pendingMode === "web"
+    && selectedPlugin !== null
   readonly property bool useBrowsePlugins: showingResults
     && !loading
     && pendingDomain === "plugins"
     && pendingMode === "web"
-  readonly property bool useFullscreenLayout: usePreviewTheme || useBrowsePlugins
+    && selectedPlugin === null
+  readonly property bool useFullscreenLayout: usePreviewTheme || useBrowsePlugins || usePluginDetail
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -78,7 +87,8 @@ Item {
     "appearance": {
       title: "Appearance",
       rows: [
-        { itemId: "themes", label: "Themes", icon: "󰏘", kind: "menu" }
+        { itemId: "themes", label: "Themes", icon: "󰏘", kind: "menu" },
+        { itemId: "background", label: "Backgrounds", icon: "󰸉", kind: "menu" }
       ]
     },
     "themes": {
@@ -87,6 +97,31 @@ Item {
         { itemId: "themes.web", label: "Add", icon: "󰐕", kind: "action", domain: "themes", mode: "web" },
         { itemId: "themes.local", label: "Installed", icon: "󰉋", kind: "action", domain: "themes", mode: "local" }
       ]
+    },
+    "background": {
+      title: "Backgrounds",
+      rows: [
+        { itemId: "background.theme", label: "Theme", icon: "󰏘", kind: "menu" },
+        { itemId: "background.themes", label: "All themes", icon: "󰕰", kind: "menu" },
+        { itemId: "background.wallpapers", label: "My wallpapers", icon: "󰋩", kind: "menu" },
+        { itemId: "background.all", label: "All wallpapers", icon: "󰸉", kind: "menu" }
+      ]
+    },
+    "background.theme": {
+      title: "Theme",
+      rows: []
+    },
+    "background.themes": {
+      title: "All themes",
+      rows: []
+    },
+    "background.wallpapers": {
+      title: "My wallpapers",
+      rows: []
+    },
+    "background.all": {
+      title: "All wallpapers",
+      rows: []
     },
     "apps": {
       title: "Apps",
@@ -244,6 +279,8 @@ Item {
     root.resultRows = []
     root.themeResults = []
     root.pluginResults = []
+    root.selectedPlugin = null
+    root.installedPluginIds = ({})
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = true
@@ -360,6 +397,14 @@ Item {
   }
 
   function goBack() {
+    if (root.selectedPlugin !== null) {
+      root.selectedPlugin = null
+      Qt.callLater(function() {
+        if (root.useBrowsePlugins)
+          browsePlugins.focusGrid()
+      })
+      return
+    }
     if (root.showingResults) {
       rustSearchTimer.stop()
       if (searchProcess.running)
@@ -373,6 +418,8 @@ Item {
       root.resultRows = []
       root.themeResults = []
       root.pluginResults = []
+      root.selectedPlugin = null
+      root.installedPluginIds = ({})
       root.filterText = ""
       root.selectedIndex = 0
       root.cursorActive = true
@@ -418,6 +465,8 @@ Item {
     root.resultRows = []
     root.themeResults = []
     root.pluginResults = []
+    root.selectedPlugin = null
+    root.installedPluginIds = ({})
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = false
@@ -434,6 +483,9 @@ Item {
       argv = [root.runScript(), "-s", root.domainFlag(domain), "-w"]
     searchProcess.command = argv
     searchProcess.running = true
+
+    if (domain === "plugins" && mode === "web")
+      root.refreshInstalledPlugins()
   }
 
   // Parse JSON array from cOMtrol stdout into menu rows.
@@ -476,6 +528,17 @@ Item {
         var plugins = []
         for (var p = 0; p < data.length; p++) {
           var plugin = data[p] || {}
+          var installCmd = root.jsonField(plugin, "install_command")
+          var installAvailable = !!(plugin.install_available || plugin["install_available"])
+          // Catalog entries without an install path are not shown in BrowsePlugins.
+          if (!installCmd && !installAvailable)
+            continue
+          var tags = plugin.tags || plugin["tags"] || []
+          var tagList = []
+          if (tags && tags.length !== undefined) {
+            for (var ti = 0; ti < tags.length; ti++)
+              tagList.push(String(tags[ti]))
+          }
           plugins.push({
             id: root.jsonField(plugin, "id"),
             name: root.jsonField(plugin, "name"),
@@ -483,9 +546,17 @@ Item {
             author: root.jsonField(plugin, "author"),
             repo: root.jsonField(plugin, "repo"),
             description: root.jsonField(plugin, "description"),
+            category: root.jsonField(plugin, "category"),
+            source_type: root.jsonField(plugin, "source_type"),
             preview: root.jsonField(plugin, "preview_image"),
-            install_command: root.jsonField(plugin, "install_command"),
-            install_available: !!(plugin.install_available || plugin["install_available"]),
+            install_command: installCmd,
+            install_available: installAvailable,
+            tags: tagList,
+            hearts: plugin.hearts || plugin["hearts"] || 0,
+            stars: plugin.stars || plugin["stars"] || 0,
+            views: plugin.views || plugin["views"] || 0,
+            copies: plugin.copies || plugin["copies"] || 0,
+            installed: !!root.installedPluginIds[root.jsonField(plugin, "id")],
             mode: "web"
           })
         }
@@ -549,13 +620,97 @@ Item {
   function applyPlugin(plugin) {
     if (!plugin)
       return
-    var cmd = String(plugin.install_command || "")
+    // Catalog install_command is typically: "omarchy plugin add <git-url> --enable"
+    var cmd = String(plugin.install_command || "").trim()
     if (!cmd)
       return
+    // Quickshell Process has no TTY — omarchy-plugin-add refuses without --yes.
+    if (cmd.indexOf("--yes") < 0 && !/(^|\s)-y(\s|$)/.test(cmd))
+      cmd += " --yes"
     if (themeApplyProc.running)
       themeApplyProc.running = false
     themeApplyProc.command = ["bash", "-lc", cmd]
     themeApplyProc.running = true
+  }
+
+  function removePlugin(plugin) {
+    if (!plugin)
+      return
+    var id = String(plugin.id || plugin["id"] || "")
+    if (!id)
+      return
+    // Rust: cOMtrol -r -plugin <id>
+    if (themeRemoveProc.running)
+      themeRemoveProc.running = false
+    themeRemoveProc.command = [root.runScript(), "-r", "-plugin", id]
+    themeRemoveProc.running = true
+  }
+
+  function refreshInstalledPlugins() {
+    root.installedPluginsSerial += 1
+    installedPluginsProc.serial = root.installedPluginsSerial
+    if (installedPluginsProc.running)
+      installedPluginsProc.running = false
+    installedPluginsProc.command = [root.runScript(), "-v", "-plugin"]
+    installedPluginsProc.running = true
+  }
+
+  function applyInstalledFlags() {
+    var ids = root.installedPluginIds || ({})
+    var list = root.pluginResults || []
+    var next = []
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i] || {}
+      var copy = ({})
+      for (var k in p)
+        copy[k] = p[k]
+      copy.installed = !!ids[String(p.id || "")]
+      next.push(copy)
+    }
+    root.pluginResults = next
+    if (root.selectedPlugin) {
+      var sel = ({})
+      for (var sk in root.selectedPlugin)
+        sel[sk] = root.selectedPlugin[sk]
+      sel.installed = !!ids[String(sel.id || "")]
+      root.selectedPlugin = sel
+    }
+  }
+
+  function openPluginDetail(plugin) {
+    if (!plugin)
+      return
+    var next = ({})
+    for (var k in plugin)
+      next[k] = plugin[k]
+    next.installed = !!root.installedPluginIds[String(plugin.id || "")]
+    root.selectedPlugin = next
+    Qt.callLater(function() {
+      if (root.usePluginDetail)
+        pluginDetail.focusDetail()
+    })
+  }
+
+  function bumpPluginHearts(pluginId) {
+    var id = String(pluginId || "")
+    if (!id)
+      return
+    var list = root.pluginResults || []
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].id || "") === id) {
+        list[i].hearts = Number(list[i].hearts || 0) + 1
+        break
+      }
+    }
+    root.pluginResults = list.slice()
+    if (root.selectedPlugin && String(root.selectedPlugin.id || "") === id) {
+      var next = ({})
+      for (var k in root.selectedPlugin)
+        next[k] = root.selectedPlugin[k]
+      next.hearts = Number(next.hearts || 0) + 1
+      // heartSent in detail already +1 visually; sync base count and reset flag via reassignment
+      root.selectedPlugin = next
+    }
   }
 
   function removeTheme(theme) {
@@ -573,6 +728,10 @@ Item {
 
   Process {
     id: themeApplyProc
+    onExited: function(exitCode) {
+      if (exitCode === 0 && root.pendingDomain === "plugins" && root.pendingMode === "web")
+        root.refreshInstalledPlugins()
+    }
   }
 
   Process {
@@ -581,6 +740,35 @@ Item {
       // Refresh local theme list after Rust remove (success or partial).
       if (root.pendingDomain === "themes" && root.pendingMode === "local")
         root.runComtrol("themes", "local", "Installed")
+      else if (root.pendingDomain === "plugins" && root.pendingMode === "web")
+        root.refreshInstalledPlugins()
+    }
+  }
+
+  Process {
+    id: installedPluginsProc
+    property int serial: 0
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (installedPluginsProc.serial !== root.installedPluginsSerial)
+          return
+        var ids = ({})
+        try {
+          var data = JSON.parse(String(text || "[]"))
+          if (data && data.length !== undefined) {
+            for (var i = 0; i < data.length; i++) {
+              var id = root.jsonField(data[i] || {}, "id")
+              if (id)
+                ids[id] = true
+            }
+          }
+        } catch (e) {
+          ids = ({})
+        }
+        root.installedPluginIds = ids
+        root.applyInstalledFlags()
+      }
     }
   }
 
@@ -690,6 +878,7 @@ Item {
       onBackRequested: root.goBack()
       onThemeActivated: function(theme) { root.applyTheme(theme) }
       onThemeRemoveRequested: function(theme) { root.removeTheme(theme) }
+      onDismissRequested: root.dismiss()
     }
 
     Layouts.BrowsePlugins {
@@ -698,7 +887,20 @@ Item {
       visible: root.useBrowsePlugins
       plugins: root.pluginResults
       onBackRequested: root.goBack()
-      onPluginActivated: function(plugin) { root.applyPlugin(plugin) }
+      onPluginActivated: function(plugin) { root.openPluginDetail(plugin) }
+      onDismissRequested: root.dismiss()
+    }
+
+    Layouts.PluginDetail {
+      id: pluginDetail
+      anchors.fill: parent
+      visible: root.usePluginDetail
+      plugin: root.selectedPlugin || ({})
+      onBackRequested: root.goBack()
+      onDismissRequested: root.dismiss()
+      onInstallRequested: function(plugin) { root.applyPlugin(plugin) }
+      onRemoveRequested: function(plugin) { root.removePlugin(plugin) }
+      onHeartSentFor: function(pluginId) { root.bumpPluginHearts(pluginId) }
     }
 
     BorderSurface {
@@ -723,8 +925,7 @@ Item {
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
-            if (root.filterText) root.setFilter("")
-            else root.goBack()
+            root.dismiss()
             event.accepted = true
           } else if (Util.editsFilter(event, root.filterText)) {
             root.setFilter(Util.editedFilter(event, root.filterText))
