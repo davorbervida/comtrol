@@ -9,7 +9,6 @@ use serde_json::{Value, json};
 
 const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 const SEARCH_PAGES: u32 = 3;
-const TOP_N: usize = 30;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Theme {
@@ -37,8 +36,8 @@ pub fn local(query: &str) -> String {
 
 /// Search Omarchy themes on GitHub (repos with `preview.png`).
 ///
-/// Empty `query` returns the top 30 by stars. Non-empty filters the
-/// cached catalog by name, full name, description, and author.
+/// Empty `query` returns the full catalog sorted by stars. Non-empty filters
+/// the cached catalog by name, full name, description, and author.
 /// Results are cached under `~/.cache/comtrol/themes.json`.
 /// Returns a JSON array.
 pub fn web(query: &str) -> String {
@@ -274,7 +273,6 @@ fn web_items(query: &str) -> Vec<Theme> {
 
     let q = query.trim().to_lowercase();
     if q.is_empty() {
-        themes.truncate(TOP_N);
         return themes;
     }
 

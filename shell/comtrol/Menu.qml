@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "layouts" as Layouts
 
 Item {
   id: root
@@ -23,8 +24,14 @@ Item {
   property bool loading: false
   property string resultsTitle: "Results"
   property var resultRows: []
+  property var themeResults: []
   property string pendingDomain: ""
   property string pendingMode: ""
+
+  readonly property bool usePreviewTheme: showingResults
+    && !loading
+    && pendingDomain === "themes"
+    && (pendingMode === "local" || pendingMode === "web")
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -32,7 +39,7 @@ Item {
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
   property color selectedBorder: Color.menu.selectedBorder
   property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", selectedBorder, 0)
-  property color scrim: Color.menu.scrim
+  property color scrim: usePreviewTheme ? Color.imagePicker.scrim : Color.menu.scrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
   readonly property int cornerRadius: Style.cornerRadius
@@ -53,38 +60,38 @@ Item {
     "root": {
       title: "Control",
       rows: [
-        { id: "themes", label: "Themes", icon: "󰏘", kind: "menu" },
-        { id: "plugins", label: "Plugins", icon: "󰐱", kind: "menu" },
-        { id: "packages", label: "Packages", icon: "󰏖", kind: "menu" },
-        { id: "aurs", label: "AUR", icon: "󰣇", kind: "menu" }
+        { itemId: "themes", label: "Themes", icon: "󰏘", kind: "menu" },
+        { itemId: "plugins", label: "Plugins", icon: "󰐱", kind: "menu" },
+        { itemId: "packages", label: "Packages", icon: "󰏖", kind: "menu" },
+        { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "menu" }
       ]
     },
     "themes": {
       title: "Themes",
       rows: [
-        { id: "themes.local", label: "Installed", icon: "󰉋", kind: "action", domain: "themes", mode: "local" },
-        { id: "themes.web", label: "Browse", icon: "󰖟", kind: "action", domain: "themes", mode: "web" }
+        { itemId: "themes.local", label: "Installed", icon: "󰉋", kind: "action", domain: "themes", mode: "local" },
+        { itemId: "themes.web", label: "Browse", icon: "󰖟", kind: "action", domain: "themes", mode: "web" }
       ]
     },
     "plugins": {
       title: "Plugins",
       rows: [
-        { id: "plugins.local", label: "Installed", icon: "󰉋", kind: "action", domain: "plugins", mode: "local" },
-        { id: "plugins.web", label: "Browse", icon: "󰖟", kind: "action", domain: "plugins", mode: "web" }
+        { itemId: "plugins.local", label: "Installed", icon: "󰉋", kind: "action", domain: "plugins", mode: "local" },
+        { itemId: "plugins.web", label: "Browse", icon: "󰖟", kind: "action", domain: "plugins", mode: "web" }
       ]
     },
     "packages": {
       title: "Packages",
       rows: [
-        { id: "packages.local", label: "Installed", icon: "󰉋", kind: "action", domain: "packages", mode: "local" },
-        { id: "packages.web", label: "Browse", icon: "󰖟", kind: "action", domain: "packages", mode: "web" }
+        { itemId: "packages.local", label: "Installed", icon: "󰉋", kind: "action", domain: "packages", mode: "local" },
+        { itemId: "packages.web", label: "Browse", icon: "󰖟", kind: "action", domain: "packages", mode: "web" }
       ]
     },
     "aurs": {
       title: "AUR",
       rows: [
-        { id: "aurs.local", label: "Installed", icon: "󰉋", kind: "action", domain: "aurs", mode: "local" },
-        { id: "aurs.web", label: "Browse", icon: "󰖟", kind: "action", domain: "aurs", mode: "web" }
+        { itemId: "aurs.local", label: "Installed", icon: "󰉋", kind: "action", domain: "aurs", mode: "local" },
+        { itemId: "aurs.web", label: "Browse", icon: "󰖟", kind: "action", domain: "aurs", mode: "web" }
       ]
     }
   })
@@ -102,6 +109,79 @@ Item {
     return root.pluginDir() + "/run.sh"
   }
 
+  function domainFlag(domain) {
+    switch (domain) {
+      case "themes": return "-theme"
+      case "plugins": return "-plugin"
+      case "packages": return "-package"
+      case "aurs": return "-aur"
+      case "bindings": return "-binding"
+      case "webapps": return "-webapp"
+      default: return "-" + String(domain || "").replace(/s$/, "")
+    }
+  }
+
+  function jsonField(obj, key) {
+    if (!obj)
+      return ""
+    var value = obj[key]
+    if (value === undefined || value === null)
+      return ""
+    return String(value)
+  }
+
+  function resultLabel(item) {
+    if (!item || typeof item !== "object")
+      return "?"
+
+    var name = root.jsonField(item, "name")
+    var itemId = root.jsonField(item, "id")
+    var fullName = root.jsonField(item, "full_name")
+    var repo = root.jsonField(item, "repo")
+    var source = root.jsonField(item, "source")
+
+    // pacman web results: repo/name
+    if (repo && name && !fullName && !source)
+      return repo + "/" + name
+    if (name)
+      return name
+    if (itemId)
+      return itemId
+    if (fullName)
+      return fullName
+    return "?"
+  }
+
+  function resultItemId(item, index) {
+    return root.jsonField(item, "id")
+      || root.jsonField(item, "name")
+      || root.jsonField(item, "full_name")
+      || ("result." + index)
+  }
+
+  function extractJsonArray(text) {
+    var raw = String(text || "").trim()
+    if (!raw)
+      return []
+
+    // Prefer a top-level array; tolerate leading/trailing noise around [...].
+    var start = raw.indexOf("[")
+    var end = raw.lastIndexOf("]")
+    var candidate = (start >= 0 && end > start) ? raw.substring(start, end + 1) : raw
+
+    var data = JSON.parse(candidate)
+    // QML/JSON may yield array-like objects where Array.isArray is false.
+    if (data && data.length !== undefined) {
+      var out = []
+      for (var i = 0; i < data.length; i++)
+        out.push(data[i])
+      return out
+    }
+    if (data && typeof data === "object")
+      return [data]
+    return []
+  }
+
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
@@ -115,6 +195,7 @@ Item {
     root.showingResults = false
     root.loading = false
     root.resultRows = []
+    root.themeResults = []
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = true
@@ -156,15 +237,17 @@ Item {
     displayModel.clear()
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i]
-      if (q && String(row.label).toLowerCase().indexOf(q) < 0 && String(row.id).toLowerCase().indexOf(q) < 0)
+      var itemId = String(row.itemId || row.id || "")
+      var label = String(row.label || "")
+      if (q && label.toLowerCase().indexOf(q) < 0 && itemId.toLowerCase().indexOf(q) < 0)
         continue
       displayModel.append({
-        itemId: row.id,
-        kind: row.kind,
-        icon: row.icon || "",
-        label: row.label,
-        domain: row.domain || "",
-        mode: row.mode || ""
+        itemId: itemId,
+        kind: String(row.kind || ""),
+        icon: String(row.icon || ""),
+        label: label,
+        domain: String(row.domain || ""),
+        mode: String(row.mode || "")
       })
     }
 
@@ -199,13 +282,17 @@ Item {
     if (root.showingResults) {
       if (searchProcess.running)
         searchProcess.running = false
+      if (themeApplyProc.running)
+        themeApplyProc.running = false
       root.showingResults = false
       root.loading = false
       root.resultRows = []
+      root.themeResults = []
       root.filterText = ""
       root.selectedIndex = 0
       root.cursorActive = true
       root.rebuildDisplay()
+      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
       return
     }
     if (root.navStack.length === 0) {
@@ -244,45 +331,98 @@ Item {
     root.showingResults = true
     root.loading = true
     root.resultRows = []
+    root.themeResults = []
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = false
     root.rebuildDisplay()
 
-    var argv = [root.runScript(), domain, mode]
+    // Installed → system view (-v); Browse → search web (-s -w)
+    var argv
+    if (mode === "local")
+      argv = [root.runScript(), "-v", root.domainFlag(domain)]
+    else
+      argv = [root.runScript(), "-s", root.domainFlag(domain), "-w"]
     searchProcess.command = argv
     searchProcess.running = true
   }
 
-  // Parse human-readable cOMtrol stdout into menu rows.
-  // Entries start on a non-indented line; indented lines are ignored for the label.
+  // Parse JSON array from cOMtrol stdout into menu rows.
   function parseResults(text) {
-    var lines = String(text || "").split("\n")
     var rows = []
-    var i
-    for (i = 0; i < lines.length; i++) {
-      var line = lines[i]
-      if (!line || line.charAt(0) === " " || line.charAt(0) === "\t")
-        continue
-      if (/^\d+\s+result\(s\)/.test(line))
-        continue
+    var raw = String(text || "").trim()
+    if (!raw)
+      return rows
 
-      var label = line
-      var em = line.indexOf("  —  ")
-      if (em >= 0)
-        label = line.substring(0, em)
+    try {
+      var data = root.extractJsonArray(raw)
 
+      if (root.pendingDomain === "themes" && (root.pendingMode === "local" || root.pendingMode === "web")) {
+        var themes = []
+        for (var t = 0; t < data.length; t++) {
+          var theme = data[t] || {}
+          var preview = root.jsonField(theme, "preview")
+          if (!preview)
+            preview = root.jsonField(theme, "preview_image")
+          themes.push({
+            name: root.jsonField(theme, "name"),
+            full_name: root.jsonField(theme, "full_name"),
+            path: root.jsonField(theme, "path"),
+            preview: preview,
+            source: root.jsonField(theme, "source"),
+            repo: root.jsonField(theme, "repo"),
+            stars: theme.stars || theme["stars"] || 0,
+            author: root.jsonField(theme, "author"),
+            description: root.jsonField(theme, "description"),
+            ansi_colors: theme.ansi_colors || theme["ansi_colors"] || [],
+            mode: root.pendingMode
+          })
+        }
+        root.themeResults = themes
+        return rows
+      }
+
+      root.themeResults = []
+      for (var i = 0; i < data.length; i++) {
+        var item = data[i] || {}
+        rows.push({
+          itemId: root.resultItemId(item, i),
+          label: root.resultLabel(item),
+          icon: "󰈔",
+          kind: "result",
+          domain: root.pendingDomain || "",
+          mode: root.pendingMode || ""
+        })
+      }
+    } catch (e) {
+      root.themeResults = []
       rows.push({
-        id: "result." + rows.length,
-        label: label,
-        icon: "󰈔",
-        kind: "result"
+        itemId: "result.error",
+        label: "Invalid JSON from cOMtrol",
+        icon: "󰀦",
+        kind: "result",
+        domain: "",
+        mode: ""
       })
     }
     return rows
   }
 
+  function applyTheme(theme) {
+    if (!theme || !theme.name)
+      return
+    // Browse (web) previews are remote catalogs — only apply installed/local themes.
+    if (root.pendingMode === "web" || theme.mode === "web")
+      return
+    themeApplyProc.command = ["omarchy-theme-set", String(theme.name)]
+    themeApplyProc.running = true
+  }
+
   ListModel { id: displayModel }
+
+  Process {
+    id: themeApplyProc
+  }
 
   Process {
     id: searchProcess
@@ -294,7 +434,10 @@ Item {
         root.selectedIndex = 0
         root.cursorActive = root.resultRows.length > 0
         root.rebuildDisplay()
-        Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+        if (root.usePreviewTheme)
+          Qt.callLater(function() { previewTheme.focusCarousel() })
+        else
+          Qt.callLater(function() { keyCatcher.forceActiveFocus() })
       }
     }
     stderr: StdioCollector {
@@ -302,12 +445,14 @@ Item {
       onStreamFinished: {
         if (!text || !String(text).trim())
           return
-        if (root.loading && root.resultRows.length === 0) {
+        if (root.loading && root.resultRows.length === 0 && root.themeResults.length === 0) {
           root.resultRows = [{
-            id: "result.error",
+            itemId: "result.error",
             label: String(text).trim().split("\n")[0],
             icon: "󰀦",
-            kind: "result"
+            kind: "result",
+            domain: "",
+            mode: ""
           }]
           root.loading = false
           root.rebuildDisplay()
@@ -317,16 +462,20 @@ Item {
     onExited: function(exitCode) {
       if (!root.loading)
         return
-      if (exitCode !== 0 && root.resultRows.length === 0) {
+      if (exitCode !== 0 && root.resultRows.length === 0 && root.themeResults.length === 0) {
         root.resultRows = [{
-          id: "result.error",
+          itemId: "result.error",
           label: "cOMtrol failed (exit " + exitCode + ")",
           icon: "󰀦",
-          kind: "result"
+          kind: "result",
+          domain: "",
+          mode: ""
         }]
       }
       root.loading = false
       root.rebuildDisplay()
+      if (root.usePreviewTheme)
+        Qt.callLater(function() { previewTheme.focusCarousel() })
     }
   }
 
@@ -347,11 +496,21 @@ Item {
 
     MouseArea {
       anchors.fill: parent
-      onClicked: root.dismiss()
+      onClicked: root.usePreviewTheme ? root.goBack() : root.dismiss()
+    }
+
+    Layouts.PreviewTheme {
+      id: previewTheme
+      anchors.fill: parent
+      visible: root.usePreviewTheme
+      themes: root.themeResults
+      onBackRequested: root.goBack()
+      onThemeActivated: function(theme) { root.applyTheme(theme) }
     }
 
     BorderSurface {
       id: card
+      visible: !root.usePreviewTheme
       width: root.cardWidth
       height: Math.min(root.cardHeight, panel.height - Style.gapsOut * 2)
       radius: root.cornerRadius
@@ -482,7 +641,10 @@ Item {
                   height: parent.height
                   verticalAlignment: Text.AlignVCenter
                   elide: Text.ElideRight
-                  width: parent.width - Style.space(24) - Style.space(12) - Style.space(16) - Style.space(24)
+                  width: Math.max(
+                    Style.space(40),
+                    parent.width - Style.space(24) - Style.space(12) - Style.space(16) - Style.space(24)
+                  )
                 }
 
                 Text {
