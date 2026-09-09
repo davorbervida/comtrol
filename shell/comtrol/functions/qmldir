@@ -3,3 +3,4 @@ singleton Themes 1.0 themes.qml
 singleton Backgrounds 1.0 backgrounds.qml
 singleton Packages 1.0 packages.qml
 singleton Aurs 1.0 aurs.qml
+singleton WebApps 1.0 web_apps.qml

@@ -33,8 +33,11 @@ Item {
   property int webPackagesSerial: 0
   property int localAursSerial: 0
   property int webAursSerial: 0
+  property int localWebAppsSerial: 0
   property int pendingPackageRemoveSerial: -1
+  property int pendingWebAppRemoveSerial: -1
   property bool refreshPackagesAfterRemove: false
+  property bool refreshWebAppsAfterRemove: false
   property bool suppressDismissClick: false
 
   readonly property bool usePreviewTheme: showingResults
@@ -161,6 +164,17 @@ Item {
     if (root.pendingDomain === "packages" || root.pendingDomain === "aurs")
       return root.jsonField(item, "description")
 
+    if (root.pendingDomain === "webapps") {
+      var url = root.jsonField(item, "url")
+      var source = root.jsonField(item, "source")
+      var parts = []
+      if (url)
+        parts.push(url)
+      if (source === "first_party")
+        parts.push("system")
+      return parts.join("  ")
+    }
+
     if (root.pendingDomain !== "plugins")
       return ""
 
@@ -279,8 +293,11 @@ Item {
         searchProcess.running = false
       Packages.cancel()
       Aurs.cancel()
+      WebApps.cancel()
       root.pendingPackageRemoveSerial = -1
+      root.pendingWebAppRemoveSerial = -1
       root.refreshPackagesAfterRemove = false
+      root.refreshWebAppsAfterRemove = false
       root.showingResults = false
       root.loading = false
       root.resultRows = []
@@ -298,8 +315,10 @@ Item {
       root.webPackagesSerial += 1
       root.localAursSerial += 1
       root.webAursSerial += 1
+      root.localWebAppsSerial += 1
       Packages.cancel()
       Aurs.cancel()
+      WebApps.cancel()
       root.loading = false
       cardMenu.clearPendingAction()
       return
@@ -451,6 +470,19 @@ Item {
       }
       root.webAursSerial = Aurs.webSerial + 1
       Aurs.searchWeb("")
+      return
+    }
+
+    if (domain === "webapps" && mode === "local") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = false
+      root.loading = true
+      root.resultRows = []
+      cardMenu.markActionLoading(domain, mode)
+      root.localWebAppsSerial = WebApps.installedSerial + 1
+      WebApps.listInstalled()
       return
     }
 
@@ -700,6 +732,42 @@ Item {
     }
   }
 
+  function webAppsToResultRows(apps) {
+    var rows = []
+    var list = apps || []
+    var prevDomain = root.pendingDomain
+    root.pendingDomain = "webapps"
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var iconName = root.jsonField(item, "icon")
+      rows.push({
+        itemId: root.resultItemId(item, i),
+        label: root.resultLabel(item),
+        detail: root.resultDetail(item),
+        icon: "󰈔",
+        appIcon: iconName,
+        path: root.jsonField(item, "path"),
+        kind: "result",
+        domain: "webapps",
+        mode: root.pendingMode || "local"
+      })
+    }
+    root.pendingDomain = prevDomain
+    return rows
+  }
+
+  function applyLocalWebAppsList(apps) {
+    if (root.pendingDomain !== "webapps" || root.pendingMode !== "local")
+      return
+    if (WebApps.installedSerial !== root.localWebAppsSerial)
+      return
+    root.resultRows = root.webAppsToResultRows(apps)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
   function openPluginDetail(plugin) {
     if (!plugin)
       return
@@ -720,6 +788,17 @@ Item {
     if (!name)
       return
     var id = String(name)
+
+    if (root.pendingDomain === "webapps" && root.pendingMode === "local") {
+      root.refreshWebAppsAfterRemove = true
+      root.loading = true
+      root.pendingWebAppRemoveSerial = WebApps.remove(id)
+      if (root.pendingWebAppRemoveSerial < 0) {
+        root.refreshWebAppsAfterRemove = false
+        root.loading = false
+      }
+      return
+    }
 
     root.refreshPackagesAfterRemove = true
     root.loading = true
@@ -1073,6 +1152,26 @@ Item {
         }]
         root.finishSearch()
         Qt.callLater(root.focusActiveLayout)
+      }
+    }
+
+    Connections {
+      target: WebApps
+      function onLocalListed(apps) {
+        root.applyLocalWebAppsList(apps)
+      }
+      function onRemoveFinished(exitCode, serial, payload) {
+        if (serial !== root.pendingWebAppRemoveSerial)
+          return
+        root.pendingWebAppRemoveSerial = -1
+        if (!root.refreshWebAppsAfterRemove)
+          return
+        root.refreshWebAppsAfterRemove = false
+        Qt.callLater(function() {
+          if (!root.opened)
+            return
+          root.runComtrol("webapps", "local", root.resultsTitle || "Web Apps")
+        })
       }
     }
   }

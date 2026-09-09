@@ -3,6 +3,7 @@ import Quickshell.Io
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../../functions"
 
 // Card menu: navigation tree, desktop apps, and list results (packages/AUR/etc.).
 Item {
@@ -566,6 +567,7 @@ Item {
         kind: String(row.kind || ""),
         icon: String(row.icon || ""),
         appIcon: String(row.appIcon || ""),
+        path: String(row.path || ""),
         label: label,
         detail: String(row.detail || ""),
         domain: String(row.domain || ""),
@@ -664,6 +666,18 @@ Item {
         }
       }
       root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "webapps") {
+      var desktopPath = String(row.path || "")
+      if (!desktopPath) {
+        var hits = WebApps.findByName(String(row.itemId || row.label || ""))
+        if (hits && hits.length > 0)
+          desktopPath = String(hits[0].path || "")
+      }
+      if (desktopPath && WebApps.launch(desktopPath))
+        root.dismissRequested()
     }
   }
 
@@ -746,8 +760,8 @@ Item {
           event.accepted = true
         } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
           if (root.showingResults
-              && root.pendingDomain === "packages"
-              && root.pendingMode === "local"
+              && ((root.pendingDomain === "packages" && root.pendingMode === "local")
+                  || (root.pendingDomain === "webapps" && root.pendingMode === "local"))
               && root.cursorActive
               && root.selectedIndex >= 0
               && root.selectedIndex < displayModel.count) {
@@ -811,6 +825,7 @@ Item {
             required property string kind
             required property string icon
             required property string appIcon
+            required property string path
             required property string label
             required property string detail
             required property string domain
@@ -821,8 +836,9 @@ Item {
             readonly property bool hasDetail: detail.length > 0
             readonly property bool isApp: row.kind === "app"
             readonly property bool showPackageRemove: row.kind === "result"
-              && root.pendingDomain === "packages"
-              && root.pendingMode === "local"
+              && ((root.pendingDomain === "packages" && root.pendingMode === "local")
+                  || (root.pendingDomain === "webapps" && root.pendingMode === "local"))
+            readonly property bool showResultIconImage: row.kind === "result" && String(row.appIcon || "").length > 0
             readonly property bool isSlider: row.kind === "slider"
             readonly property bool hasStatus: row.status.length > 0
             readonly property int trailingWidth: (showPackageRemove || hasStatus) ? Style.space(88) : Style.space(16)
@@ -848,7 +864,7 @@ Item {
                 Text {
                   textFormat: Text.PlainText
                   anchors.centerIn: parent
-                  visible: !row.isApp
+                  visible: !row.isApp && !row.showResultIconImage
                   text: row.icon
                   color: row.hasCursor ? root.selectedText : root.foreground
                   font.family: root.fontFamily
@@ -858,13 +874,13 @@ Item {
                 Image {
                   id: appIconImage
                   anchors.centerIn: parent
-                  visible: row.isApp && status !== Image.Error
+                  visible: (row.isApp || row.showResultIconImage) && status !== Image.Error
                   width: Style.font.iconLarge
                   height: Style.font.iconLarge
                   fillMode: Image.PreserveAspectFit
                   sourceSize.width: Math.round(width * Screen.devicePixelRatio)
                   sourceSize.height: Math.round(height * Screen.devicePixelRatio)
-                  source: row.isApp ? root.resolveAppIcon(row.appIcon) : ""
+                  source: (row.isApp || row.showResultIconImage) ? root.resolveAppIcon(row.appIcon) : ""
                   asynchronous: true
                   smooth: true
                 }
@@ -872,7 +888,7 @@ Item {
                 Text {
                   textFormat: Text.PlainText
                   anchors.centerIn: parent
-                  visible: row.isApp && appIconImage.status !== Image.Ready
+                  visible: (row.isApp || row.showResultIconImage) && appIconImage.status !== Image.Ready
                   text: row.label ? String(row.label).charAt(0).toUpperCase() : "?"
                   color: row.hasCursor ? root.selectedText : root.foreground
                   font.family: root.fontFamily
