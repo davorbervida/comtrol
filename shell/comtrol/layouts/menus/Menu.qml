@@ -70,7 +70,7 @@ Item {
     return Math.min(h, available)
   }
   readonly property int cardHeight: headerHeight + contentSpacing + visibleRowsHeight + contentMargin * 2
-  readonly property bool usesRustFilterSearch: showingResults
+  readonly property bool usesLiveFilterSearch: showingResults
     && pendingMode === "web"
     && (pendingDomain === "packages" || pendingDomain === "aurs")
 
@@ -127,7 +127,7 @@ Item {
         rows: [
           { itemId: "appearance", label: "Appearance", icon: "", kind: "menu" },
           { itemId: "apps", label: "Apps", icon: "󰀻", kind: "menu" },
-          { itemId: "plugins", label: "Plugins", icon: "󰐱", kind: "menu" },
+          { itemId: "plugins", label: "Plugins", icon: "󰐱", kind: "action", domain: "plugins", mode: "local" },
           installMenu.rootRow
         ]
       },
@@ -162,13 +162,6 @@ Item {
       "applications": {
         title: "Desktop",
         rows: []
-      },
-      "plugins": {
-        title: "Plugins",
-        rows: [
-          { itemId: "plugins.web", label: "Install", icon: "󰐕", kind: "action", domain: "plugins", mode: "web" },
-          { itemId: "plugins.local", label: "Installed", icon: "󰉋", kind: "action", domain: "plugins", mode: "local" }
-        ]
       },
     }
     tree[installMenu.itemId] = installMenu.menu
@@ -535,7 +528,7 @@ Item {
   }
 
   function rebuildDisplay() {
-    var q = root.usesRustFilterSearch ? "" : root.filterText.trim().toLowerCase()
+    var q = root.usesLiveFilterSearch ? "" : root.filterText.trim().toLowerCase()
     var rows = []
 
     if (root.showingResults) {
@@ -589,7 +582,7 @@ Item {
   function setFilter(text) {
     root.filterText = text
     root.selectedIndex = 0
-    if (root.usesRustFilterSearch) {
+    if (root.usesLiveFilterSearch) {
       root.liveSearchRequested(text)
       return
     }
@@ -761,7 +754,8 @@ Item {
         } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
           if (root.showingResults
               && ((root.pendingDomain === "packages" && root.pendingMode === "local")
-                  || (root.pendingDomain === "webapps" && root.pendingMode === "local"))
+                  || (root.pendingDomain === "webapps" && root.pendingMode === "local")
+                  || (root.pendingDomain === "plugins" && root.pendingMode === "local"))
               && root.cursorActive
               && root.selectedIndex >= 0
               && root.selectedIndex < displayModel.count) {
@@ -837,7 +831,8 @@ Item {
             readonly property bool isApp: row.kind === "app"
             readonly property bool showPackageRemove: row.kind === "result"
               && ((root.pendingDomain === "packages" && root.pendingMode === "local")
-                  || (root.pendingDomain === "webapps" && root.pendingMode === "local"))
+                  || (root.pendingDomain === "webapps" && root.pendingMode === "local")
+                  || (root.pendingDomain === "plugins" && root.pendingMode === "local"))
             readonly property bool showResultIconImage: row.kind === "result" && String(row.appIcon || "").length > 0
             readonly property bool isSlider: row.kind === "slider"
             readonly property bool hasStatus: row.status.length > 0

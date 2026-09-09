@@ -1,12 +1,11 @@
 import Quickshell
-import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import "layouts" as Layouts
 import "functions"
 
-// Plugin entry: host lifecycle + layout routing + cOMtrol CLI gateway.
+// Plugin entry: host lifecycle + layout routing + QML domain helpers.
 Item {
   id: root
 
@@ -24,7 +23,6 @@ Item {
   property var selectedPlugin: null
   property string pendingDomain: ""
   property string pendingMode: ""
-  property int searchSerial: 0
   property int localPluginsSerial: 0
   property int localThemesSerial: 0
   property int webThemesSerial: 0
@@ -36,8 +34,10 @@ Item {
   property int localWebAppsSerial: 0
   property int pendingPackageRemoveSerial: -1
   property int pendingWebAppRemoveSerial: -1
+  property int pendingPluginRemoveSerial: -1
   property bool refreshPackagesAfterRemove: false
   property bool refreshWebAppsAfterRemove: false
+  property bool refreshPluginsAfterRemove: false
   property bool suppressDismissClick: false
 
   readonly property bool usePreviewTheme: showingResults
@@ -76,33 +76,6 @@ Item {
   }
 
   property color scrim: useFullscreenLayout ? Color.imagePicker.scrim : Color.menu.scrim
-
-  function pluginDir() {
-    var url = Qt.resolvedUrl(".").toString()
-    if (url.indexOf("file://") === 0)
-      url = url.substring(7)
-    while (url.length > 1 && url.charAt(url.length - 1) === "/")
-      url = url.substring(0, url.length - 1)
-    return url
-  }
-
-  function runScript() {
-    return root.pluginDir() + "/run.sh"
-  }
-
-  function domainFlag(domain) {
-    switch (domain) {
-      case "themes": return "-theme"
-      case "plugins": return "-plugin"
-      case "packages": return "-package"
-      case "aurs": return "-aur"
-      case "bindings": return "-binding"
-      case "webapps": return "-webapp"
-      case "background":
-      case "backgrounds": return "-background"
-      default: return "-" + String(domain || "").replace(/s$/, "")
-    }
-  }
 
   function jsonField(obj, key) {
     if (!obj)
@@ -209,27 +182,6 @@ Item {
       || ("result." + index)
   }
 
-  function extractJsonArray(text) {
-    var raw = String(text || "").trim()
-    if (!raw)
-      return []
-
-    var start = raw.indexOf("[")
-    var end = raw.lastIndexOf("]")
-    var candidate = (start >= 0 && end > start) ? raw.substring(start, end + 1) : raw
-
-    var data = JSON.parse(candidate)
-    if (data && data.length !== undefined) {
-      var out = []
-      for (var i = 0; i < data.length; i++)
-        out.push(data[i])
-      return out
-    }
-    if (data && typeof data === "object")
-      return [data]
-    return []
-  }
-
   function clearLayoutResults() {
     previewTheme.clear()
     previewBackground.clear()
@@ -251,10 +203,6 @@ Item {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
 
-    if (searchProcess.running)
-      searchProcess.running = false
-    root.searchSerial += 1
-
     root.opened = true
     root.showingResults = false
     root.loading = false
@@ -265,14 +213,10 @@ Item {
   }
 
   function close() {
-    if (searchProcess.running)
-      searchProcess.running = false
     root.opened = false
   }
 
   function dismiss() {
-    if (searchProcess.running)
-      searchProcess.running = false
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide((root.manifest && root.manifest.id) || "comtrol")
@@ -288,16 +232,19 @@ Item {
       return
     }
     if (root.showingResults) {
-      rustSearchTimer.stop()
-      if (searchProcess.running)
-        searchProcess.running = false
+      liveSearchTimer.stop()
+      Plugins.cancel()
+      Themes.cancel()
+      Backgrounds.cancel()
       Packages.cancel()
       Aurs.cancel()
       WebApps.cancel()
       root.pendingPackageRemoveSerial = -1
       root.pendingWebAppRemoveSerial = -1
+      root.pendingPluginRemoveSerial = -1
       root.refreshPackagesAfterRemove = false
       root.refreshWebAppsAfterRemove = false
+      root.refreshPluginsAfterRemove = false
       root.showingResults = false
       root.loading = false
       root.resultRows = []
@@ -306,16 +253,19 @@ Item {
       return
     }
     if (root.loading && !root.usesFullscreenResults(root.pendingDomain, root.pendingMode)) {
-      rustSearchTimer.stop()
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
+      liveSearchTimer.stop()
       root.localPluginsSerial += 1
+      root.localThemesSerial += 1
+      root.webThemesSerial += 1
+      root.backgroundsSerial += 1
       root.localPackagesSerial += 1
       root.webPackagesSerial += 1
       root.localAursSerial += 1
       root.webAursSerial += 1
       root.localWebAppsSerial += 1
+      Plugins.cancel()
+      Themes.cancel()
+      Backgrounds.cancel()
       Packages.cancel()
       Aurs.cancel()
       WebApps.cancel()
@@ -331,13 +281,10 @@ Item {
     root.pendingDomain = domain
     root.pendingMode = mode
     root.resultsTitle = title || (domain + " " + mode)
-    rustSearchTimer.stop()
+    liveSearchTimer.stop()
     root.clearLayoutResults()
 
     if (domain === "boot") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = true
       root.loading = false
       root.resultRows = []
@@ -348,9 +295,6 @@ Item {
     }
 
     if (domain === "plugins" && mode === "web") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = true
       root.loading = true
       root.resultRows = []
@@ -360,9 +304,6 @@ Item {
     }
 
     if (domain === "plugins" && mode === "local") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = false
       root.loading = true
       root.resultRows = []
@@ -375,9 +316,6 @@ Item {
     }
 
     if (domain === "themes" && mode === "local") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = true
       root.loading = true
       root.resultRows = []
@@ -388,9 +326,6 @@ Item {
     }
 
     if (domain === "themes" && mode === "web") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = true
       root.loading = true
       root.resultRows = []
@@ -401,9 +336,6 @@ Item {
     }
 
     if (domain === "background") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = true
       root.loading = true
       root.resultRows = []
@@ -414,9 +346,6 @@ Item {
     }
 
     if (domain === "packages" && mode === "local") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = false
       root.loading = true
       root.resultRows = []
@@ -427,9 +356,6 @@ Item {
     }
 
     if (domain === "packages" && mode === "web") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       if (root.showingResults) {
         root.loading = true
       } else {
@@ -444,9 +370,6 @@ Item {
     }
 
     if (domain === "aurs" && mode === "local") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = false
       root.loading = true
       root.resultRows = []
@@ -457,9 +380,6 @@ Item {
     }
 
     if (domain === "aurs" && mode === "web") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       if (root.showingResults) {
         root.loading = true
       } else {
@@ -474,9 +394,6 @@ Item {
     }
 
     if (domain === "webapps" && mode === "local") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.showingResults = false
       root.loading = true
       root.resultRows = []
@@ -486,92 +403,16 @@ Item {
       return
     }
 
-    var fullscreen = root.usesFullscreenResults(domain, mode)
-    if (fullscreen) {
-      root.showingResults = true
-      root.loading = true
-      root.resultRows = []
-      cardMenu.prepareForResults()
-    } else if (root.showingResults) {
-      root.loading = true
-    } else {
-      root.showingResults = false
-      root.loading = true
-      root.resultRows = []
-      cardMenu.markActionLoading(domain, mode)
-    }
-
-    root.searchSerial += 1
-    searchProcess.serial = root.searchSerial
-    var argv
-    if (domain === "background")
-      argv = [root.runScript(), "-v", "-background", "-" + String(mode || "current")]
-    else if (mode === "local")
-      argv = [root.runScript(), "-v", root.domainFlag(domain)]
-    else
-      argv = [root.runScript(), "-s", root.domainFlag(domain), "-w"]
-
-    if (typeof searchProcess.exec === "function") {
-      searchProcess.exec(argv)
-    } else {
-      if (searchProcess.running)
-        searchProcess.running = false
-      searchProcess.command = argv
-      searchProcess.running = false
-      searchProcess.running = true
-    }
+    console.warn("comtrol: unknown domain/mode", domain, mode)
+    root.loading = false
   }
+
 
   function finishSearch() {
     if (!root.showingResults)
       root.showingResults = true
     root.loading = false
     cardMenu.clearPendingAction()
-  }
-
-  function parseResults(text) {
-    var rows = []
-    var raw = String(text || "").trim()
-    if (!raw)
-      return rows
-
-    try {
-      var data = root.extractJsonArray(raw)
-
-      if (root.pendingDomain === "themes" && (root.pendingMode === "local" || root.pendingMode === "web")) {
-        previewTheme.loadFromData(data)
-        return rows
-      }
-
-      if (root.pendingDomain === "background") {
-        previewBackground.loadFromData(data)
-        return rows
-      }
-
-      for (var i = 0; i < data.length; i++) {
-        var item = data[i] || {}
-        rows.push({
-          itemId: root.resultItemId(item, i),
-          label: root.resultLabel(item),
-          detail: root.resultDetail(item),
-          icon: root.pendingDomain === "plugins" ? "󰐱" : "󰈔",
-          kind: "result",
-          domain: root.pendingDomain || "",
-          mode: root.pendingMode || ""
-        })
-      }
-    } catch (e) {
-      rows.push({
-        itemId: "result.error",
-        label: "Invalid JSON from cOMtrol",
-        detail: "",
-        icon: "󰀦",
-        kind: "result",
-        domain: "",
-        mode: ""
-      })
-    }
-    return rows
   }
 
   function pluginsToResultRows(plugins) {
@@ -789,6 +630,17 @@ Item {
       return
     var id = String(name)
 
+    if (root.pendingDomain === "plugins" && root.pendingMode === "local") {
+      root.refreshPluginsAfterRemove = true
+      root.loading = true
+      root.pendingPluginRemoveSerial = Plugins.remove(id)
+      if (root.pendingPluginRemoveSerial < 0) {
+        root.refreshPluginsAfterRemove = false
+        root.loading = false
+      }
+      return
+    }
+
     if (root.pendingDomain === "webapps" && root.pendingMode === "local") {
       root.refreshWebAppsAfterRemove = true
       root.loading = true
@@ -809,14 +661,11 @@ Item {
     }
   }
 
-  function runLiveRustSearch() {
-    if (!cardMenu.usesRustFilterSearch)
+  function runLiveWebSearch() {
+    if (!cardMenu.usesLiveFilterSearch)
       return
 
     if (root.pendingDomain === "packages") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.loading = true
       root.webPackagesSerial = Packages.webSerial + 1
       Packages.searchWeb(String(cardMenu.filterText || ""))
@@ -824,28 +673,10 @@ Item {
     }
 
     if (root.pendingDomain === "aurs") {
-      if (searchProcess.running)
-        searchProcess.running = false
-      root.searchSerial += 1
       root.loading = true
       root.webAursSerial = Aurs.webSerial + 1
       Aurs.searchWeb(String(cardMenu.filterText || ""))
-      return
     }
-
-    if (searchProcess.running)
-      searchProcess.running = false
-
-    root.searchSerial += 1
-    searchProcess.serial = root.searchSerial
-    root.loading = true
-
-    var argv = [root.runScript(), "-s", root.domainFlag(root.pendingDomain), "-w"]
-    var q = String(cardMenu.filterText || "").trim()
-    if (q)
-      argv.push(q)
-    searchProcess.command = argv
-    searchProcess.running = true
   }
 
   function focusActiveLayout() {
@@ -861,70 +692,11 @@ Item {
       cardMenu.focusMenu()
   }
 
-  Process {
-    id: searchProcess
-    property int serial: 0
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (searchProcess.serial !== root.searchSerial)
-          return
-        root.resultRows = root.parseResults(text)
-        root.finishSearch()
-        Qt.callLater(root.focusActiveLayout)
-      }
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (searchProcess.serial !== root.searchSerial)
-          return
-        if (!text || !String(text).trim())
-          return
-        if (root.loading && root.resultRows.length === 0
-            && previewTheme.themes.length === 0 && browsePlugins.plugins.length === 0
-            && previewBackground.backgrounds.length === 0) {
-          root.resultRows = [{
-            itemId: "result.error",
-            label: String(text).trim().split("\n")[0],
-            detail: "",
-            icon: "󰀦",
-            kind: "result",
-            domain: "",
-            mode: ""
-          }]
-          root.finishSearch()
-        }
-      }
-    }
-    onExited: function(exitCode) {
-      if (searchProcess.serial !== root.searchSerial)
-        return
-      if (!root.loading)
-        return
-      if (exitCode !== 0 && root.resultRows.length === 0
-          && previewTheme.themes.length === 0 && browsePlugins.plugins.length === 0
-          && previewBackground.backgrounds.length === 0) {
-        root.resultRows = [{
-          itemId: "result.error",
-          label: "cOMtrol failed (exit " + exitCode + ")",
-          detail: "",
-          icon: "󰀦",
-          kind: "result",
-          domain: "",
-          mode: ""
-        }]
-      }
-      root.finishSearch()
-      Qt.callLater(root.focusActiveLayout)
-    }
-  }
-
   Timer {
-    id: rustSearchTimer
+    id: liveSearchTimer
     interval: 250
     repeat: false
-    onTriggered: root.runLiveRustSearch()
+    onTriggered: root.runLiveWebSearch()
   }
 
   PanelWindow {
@@ -1043,7 +815,7 @@ Item {
       onBackRequested: root.goBack()
       onDismissRequested: root.dismiss()
       onActionRequested: function(domain, mode, title) { root.runComtrol(domain, mode, title) }
-      onLiveSearchRequested: rustSearchTimer.restart()
+      onLiveSearchRequested: liveSearchTimer.restart()
       onRemovePackageRequested: function(name) { root.removePackage(name) }
     }
 
@@ -1051,6 +823,19 @@ Item {
       target: Plugins
       function onInstalledListed(plugins) {
         root.applyLocalPluginsList(plugins)
+      }
+      function onRemoveFinished(exitCode, serial, payload) {
+        if (serial !== root.pendingPluginRemoveSerial)
+          return
+        root.pendingPluginRemoveSerial = -1
+        if (!root.refreshPluginsAfterRemove)
+          return
+        root.refreshPluginsAfterRemove = false
+        Qt.callLater(function() {
+          if (!root.opened)
+            return
+          root.runComtrol("plugins", "local", root.resultsTitle || "Plugins")
+        })
       }
     }
 
