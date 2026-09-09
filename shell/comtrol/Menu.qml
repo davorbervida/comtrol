@@ -10,7 +10,9 @@ Item {
   id: root
 
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
-  property var shell: null
+  // Injected by omarchy-shell on Loader.onLoaded. Keep undeclared-default so
+  // the host's `"shell" in item` check always sees the property.
+  property var shell
   property var manifest: null
 
   property bool opened: false
@@ -35,6 +37,19 @@ Item {
   property int installedPluginsSerial: 0
 
   readonly property var appLibrary: root.shell ? root.shell.appLibrary : null
+  // Local icon-name → path index. Third-party menus only get a proxy AppLibrary
+  // whose iconSource() bindings do not re-evaluate when the host icon cache
+  // fills, so we scan ourselves and bind Image.source through resolveAppIcon().
+  property var iconIndex: ({})
+  property var pendingIconIndex: ({})
+
+  onShellChanged: {
+    if (root.opened && root.applicationsMenuActive)
+      root.rebuildDisplay()
+    if (root.appLibrary)
+      root.appLibrary.refreshIcons()
+  }
+
   readonly property bool usePreviewTheme: showingResults
     && !loading
     && pendingDomain === "themes"
@@ -74,7 +89,8 @@ Item {
   property int cardWidth: Math.min(Style.space(360), panel.width - Style.gapsOut * 2)
   readonly property bool resultsHaveDetail: false
   readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
-  readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive) ? detailRowHeight : rowHeight
+  readonly property bool applicationsMenuActive: !showingResults && activeMenu === "applications"
+  readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive || applicationsMenuActive) ? detailRowHeight : rowHeight
   readonly property int visibleRowsHeight: Math.min(
     Math.max(displayModel.count, 1) * (activeRowHeight + rowSpacing) - rowSpacing,
     Math.max(activeRowHeight, panel.height - Style.gapsOut * 2 - headerHeight - contentSpacing - contentMargin * 2)
@@ -116,9 +132,14 @@ Item {
     "apps": {
       title: "Apps",
       rows: [
+        { itemId: "applications", label: "Applications", icon: "󰀻", kind: "menu" },
         { itemId: "packages", label: "Packages", icon: "󰏖", kind: "menu" },
         { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "menu" }
       ]
+    },
+    "applications": {
+      title: "Applications",
+      rows: []
     },
     "plugins": {
       title: "Plugins",
@@ -278,6 +299,7 @@ Item {
     root.selectedIndex = 0
     root.cursorActive = true
     root.rebuildDisplay()
+    root.refreshLocalIcons()
     if (root.appLibrary)
       root.appLibrary.refreshIcons()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -376,13 +398,66 @@ Item {
     return label.indexOf(q) >= 0 || itemId.indexOf(q) >= 0 || detail.indexOf(q) >= 0
   }
 
+  function fileUrl(path) {
+    if (!path)
+      return ""
+    return "file://" + String(path).split("/").map(encodeURIComponent).join("/")
+  }
+
+  function indexIconLine(path) {
+    var value = String(path || "").trim()
+    if (!value)
+      return
+    var slash = value.lastIndexOf("/")
+    var file = slash >= 0 ? value.slice(slash + 1) : value
+    var dot = file.lastIndexOf(".")
+    var name = dot > 0 ? file.slice(0, dot) : file
+    if (name.length > 0 && root.pendingIconIndex[name] === undefined)
+      root.pendingIconIndex[name] = value
+  }
+
+  function refreshLocalIcons() {
+    if (!iconIndexScan.running)
+      iconIndexScan.running = true
+  }
+
+  // Resolve a FreeDesktop icon name (or path) to an Image source URL.
+  // Reads root.iconIndex so ListView bindings refresh when the scan finishes.
+  function resolveAppIcon(icon) {
+    var value = String(icon || "").trim()
+    if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0)
+      return value
+    if (value.charAt(0) === "/")
+      return root.fileUrl(value)
+
+    // Prefer Quickshell's themed icon provider (same as Omarchy notifications).
+    var themed = Quickshell.iconPath(value.length > 0 ? value : "application-x-executable", true)
+    if (themed && String(themed).length > 0)
+      return themed
+
+    var indexed = root.iconIndex[value]
+    if (indexed)
+      return root.fileUrl(indexed)
+
+    if (root.appLibrary) {
+      try {
+        var fromLib = root.appLibrary.iconSource(value)
+        if (fromLib && String(fromLib).length > 0)
+          return String(fromLib)
+      } catch (e) {
+      }
+    }
+
+    return Quickshell.iconPath("application-x-executable", true)
+  }
+
   // Desktop apps via Omarchy AppLibrary (same source as omarchy.menu Apps),
   // with a DesktopEntries fallback if the shell proxy is unavailable.
-  function collectAppSearchRows(query) {
+  // Empty query lists the full catalog (Applications menu); non-empty filters it.
+  function collectApplicationRows(query, limit) {
     var out = []
     var q = String(query || "").trim()
-    if (!q)
-      return out
+    var maxRows = limit > 0 ? limit : (q ? 40 : 5000)
 
     var rows = []
     if (root.appLibrary) {
@@ -396,8 +471,8 @@ Item {
 
     var count = rows && rows.length !== undefined ? rows.length : 0
     if (count > 0) {
-      var limit = Math.min(count, 40)
-      for (var i = 0; i < limit; i++) {
+      var capped = Math.min(count, maxRows)
+      for (var i = 0; i < capped; i++) {
         var hit = rows[i] || {}
         var entry = hit.entry || hit
         if (!entry)
@@ -439,7 +514,7 @@ Item {
       var values = DesktopEntries.applications.values || []
       var ql = q.toLowerCase()
       var max = Math.min(values.length, 5000)
-      for (var j = 0; j < max && out.length < 40; j++) {
+      for (var j = 0; j < max && out.length < maxRows; j++) {
         var e = values[j]
         if (!e || e.noDisplay)
           continue
@@ -447,9 +522,11 @@ Item {
         var id = String(e.id || "")
         if (!name && !id)
           continue
-        var hay = (name + " " + String(e.genericName || "") + " " + id).toLowerCase()
-        if (hay.indexOf(ql) < 0)
-          continue
+        if (ql) {
+          var hay = (name + " " + String(e.genericName || "") + " " + id).toLowerCase()
+          if (hay.indexOf(ql) < 0)
+            continue
+        }
         out.push({
           itemId: id || name,
           kind: "app",
@@ -461,10 +538,20 @@ Item {
           mode: ""
         })
       }
+      out.sort(function(a, b) {
+        return String(a.label).localeCompare(String(b.label), undefined, { sensitivity: "base" })
+      })
     } catch (e3) {
       console.warn("comtrol DesktopEntries fallback failed:", e3)
     }
     return out
+  }
+
+  function collectAppSearchRows(query) {
+    var q = String(query || "").trim()
+    if (!q)
+      return []
+    return root.collectApplicationRows(q, 40)
   }
 
   function rebuildDisplay() {
@@ -473,6 +560,9 @@ Item {
 
     if (root.showingResults) {
       rows = (root.currentMenu().rows || []).slice()
+    } else if (root.activeMenu === "applications") {
+      // Dedicated Applications menu: full desktop catalog with real icons.
+      rows = root.collectApplicationRows(root.filterText.trim(), 0)
     } else if (q) {
       // Search current menu + nested submenus, then desktop apps (AppLibrary).
       rows = root.collectDescendantRows(root.activeMenu)
@@ -610,6 +700,11 @@ Item {
       root.filterText = ""
       root.selectedIndex = 0
       root.cursorActive = true
+      if (row.itemId === "applications") {
+        root.refreshLocalIcons()
+        if (root.appLibrary)
+          root.appLibrary.refreshIcons()
+      }
       root.rebuildDisplay()
       return
     }
@@ -618,8 +713,17 @@ Item {
       return
     }
     if (row.kind === "app") {
-      if (root.appLibrary)
+      if (root.appLibrary) {
         root.appLibrary.launch(row.itemId, row.label)
+      } else {
+        // Host sometimes delivers open() before shell injection; still launch.
+        var desktopId = String(row.itemId || "")
+        if (desktopId) {
+          if (desktopId.slice(-8) !== ".desktop")
+            desktopId += ".desktop"
+          Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", desktopId])
+        }
+      }
       root.dismiss()
       return
     }
@@ -995,10 +1099,31 @@ Item {
   Connections {
     target: root.appLibrary
     function onAppsChanged() {
-      if (root.opened && root.menuSearchActive)
+      if (root.opened && (root.menuSearchActive || root.applicationsMenuActive))
         root.rebuildDisplay()
     }
   }
+
+  Process {
+    id: iconIndexScan
+    command: ["bash", "-c", [
+      'dirs="$HOME/.icons $HOME/.local/share/icons";',
+      'IFS=":"; for d in ${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do dirs="$dirs $d/icons"; done; unset IFS;',
+      'for ext in svg png; do',
+      '  for base in $dirs; do',
+      '    [[ -d $base ]] && find "$base" \\( -path "*/apps/*" -o -path "*/devices/*" \\) -name "*.$ext" 2>/dev/null;',
+      '  done;',
+      '  find /usr/share/pixmaps -maxdepth 1 -name "*.$ext" 2>/dev/null;',
+      'done'
+    ].join(" ")]
+    stdout: SplitParser {
+      onRead: function(line) { root.indexIconLine(line) }
+    }
+    onStarted: root.pendingIconIndex = ({})
+    onExited: root.iconIndex = root.pendingIconIndex
+  }
+
+  Component.onCompleted: root.refreshLocalIcons()
 
   Process {
     id: searchProcess
@@ -1249,7 +1374,7 @@ Item {
 
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
               readonly property bool hasDetail: detail.length > 0
-              readonly property bool isApp: kind === "app"
+              readonly property bool isApp: row.kind === "app"
 
               width: ListView.view.width
               height: hasDetail ? root.detailRowHeight : root.rowHeight
@@ -1278,17 +1403,29 @@ Item {
                   }
 
                   Image {
+                    id: appIconImage
                     anchors.centerIn: parent
-                    visible: row.isApp
+                    visible: row.isApp && status !== Image.Error
                     width: Style.font.iconLarge
                     height: Style.font.iconLarge
                     fillMode: Image.PreserveAspectFit
-                    sourceSize.width: width * Screen.devicePixelRatio
-                    sourceSize.height: height * Screen.devicePixelRatio
-                    source: row.isApp && root.appLibrary
-                      ? root.appLibrary.iconSource(row.appIcon)
-                      : ""
+                    sourceSize.width: Math.round(width * Screen.devicePixelRatio)
+                    sourceSize.height: Math.round(height * Screen.devicePixelRatio)
+                    source: row.isApp ? root.resolveAppIcon(row.appIcon) : ""
                     asynchronous: true
+                    smooth: true
+                  }
+
+                  // Letter fallback when the themed/file icon fails to load.
+                  Text {
+                    textFormat: Text.PlainText
+                    anchors.centerIn: parent
+                    visible: row.isApp && appIconImage.status !== Image.Ready
+                    text: row.label ? String(row.label).charAt(0).toUpperCase() : "?"
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    font.bold: true
                   }
                 }
 
