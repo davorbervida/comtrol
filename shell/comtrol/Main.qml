@@ -29,6 +29,11 @@ Item {
   property int localThemesSerial: 0
   property int webThemesSerial: 0
   property int backgroundsSerial: 0
+  property int localPackagesSerial: 0
+  property int webPackagesSerial: 0
+  property int localAursSerial: 0
+  property int webAursSerial: 0
+  property int pendingPackageRemoveSerial: -1
   property bool refreshPackagesAfterRemove: false
   property bool suppressDismissClick: false
 
@@ -272,8 +277,10 @@ Item {
       rustSearchTimer.stop()
       if (searchProcess.running)
         searchProcess.running = false
-      if (packageRemoveProc.running)
-        packageRemoveProc.running = false
+      Packages.cancel()
+      Aurs.cancel()
+      root.pendingPackageRemoveSerial = -1
+      root.refreshPackagesAfterRemove = false
       root.showingResults = false
       root.loading = false
       root.resultRows = []
@@ -287,6 +294,12 @@ Item {
         searchProcess.running = false
       root.searchSerial += 1
       root.localPluginsSerial += 1
+      root.localPackagesSerial += 1
+      root.webPackagesSerial += 1
+      root.localAursSerial += 1
+      root.webAursSerial += 1
+      Packages.cancel()
+      Aurs.cancel()
       root.loading = false
       cardMenu.clearPendingAction()
       return
@@ -378,6 +391,66 @@ Item {
       cardMenu.prepareForResults()
       root.backgroundsSerial = Backgrounds.listSerial + 1
       Backgrounds.list(mode || "current")
+      return
+    }
+
+    if (domain === "packages" && mode === "local") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = false
+      root.loading = true
+      root.resultRows = []
+      cardMenu.markActionLoading(domain, mode)
+      root.localPackagesSerial = Packages.installedSerial + 1
+      Packages.listInstalled()
+      return
+    }
+
+    if (domain === "packages" && mode === "web") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.webPackagesSerial = Packages.webSerial + 1
+      Packages.searchWeb("")
+      return
+    }
+
+    if (domain === "aurs" && mode === "local") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = false
+      root.loading = true
+      root.resultRows = []
+      cardMenu.markActionLoading(domain, mode)
+      root.localAursSerial = Aurs.installedSerial + 1
+      Aurs.listInstalled()
+      return
+    }
+
+    if (domain === "aurs" && mode === "web") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.webAursSerial = Aurs.webSerial + 1
+      Aurs.searchWeb("")
       return
     }
 
@@ -537,6 +610,96 @@ Item {
     }
   }
 
+  function packagesToResultRows(packages) {
+    var rows = []
+    var list = packages || []
+    var prevDomain = root.pendingDomain
+    root.pendingDomain = "packages"
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      rows.push({
+        itemId: root.resultItemId(item, i),
+        label: root.resultLabel(item),
+        detail: root.resultDetail(item),
+        icon: "󰏖",
+        kind: "result",
+        domain: "packages",
+        mode: root.pendingMode || "local"
+      })
+    }
+    root.pendingDomain = prevDomain
+    return rows
+  }
+
+  function applyLocalPackagesList(packages) {
+    if (root.pendingDomain !== "packages" || root.pendingMode !== "local")
+      return
+    if (Packages.installedSerial !== root.localPackagesSerial)
+      return
+    root.resultRows = root.packagesToResultRows(packages)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function applyWebPackagesList(packages) {
+    if (root.pendingDomain !== "packages" || root.pendingMode !== "web")
+      return
+    if (Packages.webSerial !== root.webPackagesSerial)
+      return
+    root.resultRows = root.packagesToResultRows(packages)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function aursToResultRows(packages) {
+    var rows = []
+    var list = packages || []
+    var prevDomain = root.pendingDomain
+    root.pendingDomain = "aurs"
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      rows.push({
+        itemId: root.resultItemId(item, i),
+        label: root.resultLabel(item),
+        detail: root.resultDetail(item),
+        icon: "󰣇",
+        kind: "result",
+        domain: "aurs",
+        mode: root.pendingMode || "local"
+      })
+    }
+    root.pendingDomain = prevDomain
+    return rows
+  }
+
+  function applyLocalAursList(packages) {
+    if (root.pendingDomain !== "aurs" || root.pendingMode !== "local")
+      return
+    if (Aurs.installedSerial !== root.localAursSerial)
+      return
+    root.resultRows = root.aursToResultRows(packages)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function applyWebAursList(packages) {
+    if (root.pendingDomain !== "aurs" || root.pendingMode !== "web")
+      return
+    if (Aurs.webSerial !== root.webAursSerial)
+      return
+    root.resultRows = root.aursToResultRows(packages)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
   function openPluginDetail(plugin) {
     if (!plugin)
       return
@@ -560,22 +723,36 @@ Item {
 
     root.refreshPackagesAfterRemove = true
     root.loading = true
-
-    var argv = [root.runScript(), "-r", "-package", id]
-    if (typeof packageRemoveProc.exec === "function") {
-      packageRemoveProc.exec(argv)
-    } else {
-      if (packageRemoveProc.running)
-        packageRemoveProc.running = false
-      packageRemoveProc.command = argv
-      packageRemoveProc.running = false
-      packageRemoveProc.running = true
+    root.pendingPackageRemoveSerial = Packages.remove(id)
+    if (root.pendingPackageRemoveSerial < 0) {
+      root.refreshPackagesAfterRemove = false
+      root.loading = false
     }
   }
 
   function runLiveRustSearch() {
     if (!cardMenu.usesRustFilterSearch)
       return
+
+    if (root.pendingDomain === "packages") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.loading = true
+      root.webPackagesSerial = Packages.webSerial + 1
+      Packages.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
+
+    if (root.pendingDomain === "aurs") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.loading = true
+      root.webAursSerial = Aurs.webSerial + 1
+      Aurs.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
 
     if (searchProcess.running)
       searchProcess.running = false
@@ -603,22 +780,6 @@ Item {
       browsePlugins.focusGrid()
     else
       cardMenu.focusMenu()
-  }
-
-  Process {
-    id: packageRemoveProc
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function() {
-      if (!root.refreshPackagesAfterRemove)
-        return
-      root.refreshPackagesAfterRemove = false
-      Qt.callLater(function() {
-        if (!root.opened)
-          return
-        root.runComtrol("packages", "local", root.resultsTitle || "Packages")
-      })
-    }
   }
 
   Process {
@@ -845,6 +1006,73 @@ Item {
       target: Backgrounds
       function onListed(backgrounds, mode) {
         root.applyBackgroundsList(backgrounds, mode)
+      }
+    }
+
+    Connections {
+      target: Packages
+      function onLocalListed(packages) {
+        root.applyLocalPackagesList(packages)
+      }
+      function onWebListed(packages) {
+        root.applyWebPackagesList(packages)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "packages" || root.pendingMode !== "web")
+          return
+        if (Packages.webSerial !== root.webPackagesSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "Package search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+      function onRemoveFinished(exitCode, serial, payload) {
+        if (serial !== root.pendingPackageRemoveSerial)
+          return
+        root.pendingPackageRemoveSerial = -1
+        if (!root.refreshPackagesAfterRemove)
+          return
+        root.refreshPackagesAfterRemove = false
+        Qt.callLater(function() {
+          if (!root.opened)
+            return
+          root.runComtrol("packages", "local", root.resultsTitle || "Packages")
+        })
+      }
+    }
+
+    Connections {
+      target: Aurs
+      function onLocalListed(packages) {
+        root.applyLocalAursList(packages)
+      }
+      function onWebListed(packages) {
+        root.applyWebAursList(packages)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "aurs" || root.pendingMode !== "web")
+          return
+        if (Aurs.webSerial !== root.webAursSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "AUR search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
       }
     }
   }
