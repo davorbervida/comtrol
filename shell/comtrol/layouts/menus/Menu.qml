@@ -92,6 +92,14 @@ Item {
     }
   }
 
+  Defaults {
+    id: defaultsMenu
+    onChanged: {
+      if (defaultsMenu.isDefaultsMenu(root.activeMenu))
+        root.rebuildDisplay()
+    }
+  }
+
   Apperiance_Fonts {
     id: appearanceFonts
     background: root.background
@@ -163,6 +171,7 @@ Item {
         title: "Apps",
         rows: [
           { itemId: "applications", label: "Desktop", icon: "󰀻", kind: "menu" },
+          defaultsMenu.rootRow,
           { itemId: "packages", label: "Packages", icon: "󰏖", kind: "action", domain: "packages", mode: "local" },
           { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "action", domain: "aurs", mode: "local" },
           { itemId: "webapps", label: "Web Apps", icon: "󰖟", kind: "action", domain: "webapps", mode: "local" }
@@ -175,6 +184,11 @@ Item {
     }
     tree[installMenu.itemId] = installMenu.menu
     tree[powerMenu.itemId] = powerMenu.menu
+    tree[defaultsMenu.itemId] = defaultsMenu.menu
+    tree[defaultsMenu.browserItemId] = defaultsMenu.browserMenu
+    tree[defaultsMenu.terminalItemId] = defaultsMenu.terminalMenu
+    tree[defaultsMenu.editorItemId] = defaultsMenu.editorMenu
+    tree[defaultsMenu.agentItemId] = defaultsMenu.agentMenu
     tree[appearanceFonts.itemId] = appearanceFonts.menu
     tree[appearanceFonts.changeItemId] = appearanceFonts.changeMenu
     tree[appearanceDesktop.itemId] = appearanceDesktop.menu
@@ -634,6 +648,8 @@ Item {
       }
       if (row.itemId === powerMenu.itemId)
         powerMenu.load()
+      if (defaultsMenu.isDefaultsMenu(row.itemId))
+        defaultsMenu.load()
       if (row.itemId === appearanceDesktop.itemId
           || row.itemId === appearanceDesktop.opacityItemId)
         appearanceDesktop.loadDesktop()
@@ -665,6 +681,10 @@ Item {
     if (row.kind === "power") {
       if (powerMenu.run(row.command || ""))
         root.dismissRequested()
+      return
+    }
+    if (row.kind === "default") {
+      defaultsMenu.setDefault(row.command || "")
       return
     }
     if (row.kind === "action" && row.domain && row.mode) {
@@ -863,7 +883,10 @@ Item {
             readonly property bool showResultIconImage: row.kind === "result" && String(row.appIcon || "").length > 0
             readonly property bool isSlider: row.kind === "slider"
             readonly property bool hasStatus: row.status.length > 0
-            readonly property int trailingWidth: (showPackageRemove || hasStatus) ? Style.space(88) : Style.space(16)
+            readonly property int trailingWidth: showPackageRemove
+              ? Style.space(88)
+              : hasStatus ? Style.space(128)
+              : Style.space(16)
 
             width: ListView.view.width
             height: root.rowHeightForKind(row.kind)
