@@ -1,0 +1,8 @@
+textlen=1765364
+count=2866
+first.id=lacuna.shell-suite
+has_install_command=false
+install_available=false
+keys=id,name,description,author,version,category,tags,repo,source_type,stars,views,copies,hearts,install_available,install_command,preview_image
+stats_status=200
+stats_len=181333

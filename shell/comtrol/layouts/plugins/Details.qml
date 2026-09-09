@@ -1,15 +1,17 @@
 import QtQuick
 import Quickshell.Io
 import qs.Commons
+import "../../functions"
 
 // Full plugin detail view opened from Browse.
 Item {
   id: root
 
   property var plugin: ({})
-  property bool layoutSettled: false
   property bool heartBusy: false
   property bool heartSent: false
+  property int pendingAddSerial: -1
+  property int pendingRemoveSerial: -1
 
   property color dimColor: Color.background
   property color foreground: Color.menu.text
@@ -25,8 +27,20 @@ Item {
   // Do not name this installedChanged — clashes with property `installed`.
   signal refreshInstalledRequested()
 
-  readonly property string pluginId: String(plugin.id || plugin["id"] || "")
-  readonly property string preview: String(plugin.preview || plugin.preview_image || "")
+  readonly property string pluginId: {
+    if (!plugin)
+      return ""
+    var value = plugin["id"]
+    if (value === undefined || value === null)
+      value = plugin.id
+    return value === undefined || value === null ? "" : String(value)
+  }
+  readonly property string previewUrl: {
+    if (!plugin)
+      return ""
+    var value = plugin["preview"] || plugin["preview_image"] || plugin.preview || plugin.preview_image
+    return value === undefined || value === null ? "" : String(value)
+  }
   readonly property string tagsText: {
     var tags = plugin.tags || []
     var parts = []
@@ -47,57 +61,42 @@ Item {
   readonly property string actionIcon: installed ? "󰆴" : "󰐕"
   readonly property string actionLabel: installed ? "Remove" : "Add"
 
-  function runScript() {
-    var url = Qt.resolvedUrl("../../run.sh").toString()
-    if (url.indexOf("file://") === 0)
-      url = url.substring(7)
-    return url
-  }
-
   function clear() {
-    root.plugin = ({})
+    // Do NOT assign root.plugin here — Main binds
+    // `plugin: root.selectedPlugin || ({})`. Writing plugin breaks that
+    // binding permanently, so later selectedPlugin updates never arrive.
     root.heartBusy = false
     root.heartSent = false
-    if (applyProc.running)
-      applyProc.running = false
-    if (removeProc.running)
-      removeProc.running = false
+    root.pendingAddSerial = -1
+    root.pendingRemoveSerial = -1
   }
 
   function applyPlugin(plugin) {
     var target = plugin || root.plugin
     if (!target)
       return
-    // Catalog install_command is typically: "omarchy plugin add <git-url> --enable"
     var cmd = String(target.install_command || "").trim()
     if (!cmd)
       return
-    // Quickshell Process has no TTY — omarchy-plugin-add refuses without --yes.
-    if (cmd.indexOf("--yes") < 0 && !/(^|\s)-y(\s|$)/.test(cmd))
-      cmd += " --yes"
-    if (applyProc.running)
-      applyProc.running = false
-    applyProc.command = ["bash", "-lc", cmd]
-    applyProc.running = true
+    root.pendingAddSerial = Plugins.add(cmd)
   }
 
   function removePlugin(plugin) {
     var target = plugin || root.plugin
     if (!target)
       return
-    var id = String(target.id || target["id"] || "")
+    var id = String(target["id"] || target.id || "")
     if (!id)
       return
-    if (removeProc.running)
-      removeProc.running = false
-    removeProc.command = [root.runScript(), "-r", "-plugin", id]
-    removeProc.running = true
+    root.pendingRemoveSerial = Plugins.remove(id)
   }
 
   onPluginChanged: {
     root.heartBusy = false
     root.heartSent = false
-    root.revealWhenSettled()
+    root.pendingAddSerial = -1
+    root.pendingRemoveSerial = -1
+    root.focusDetail()
   }
 
   function imageSource(path) {
@@ -109,18 +108,14 @@ Item {
     return Util.fileUrl(p)
   }
 
-  function revealWhenSettled() {
-    Qt.callLater(function() {
-      if (root.visible) {
-        root.layoutSettled = true
-        focusScope.forceActiveFocus()
-      }
-    })
-  }
-
   function focusDetail() {
-    if (root.visible && root.layoutSettled)
-      focusScope.forceActiveFocus()
+    if (!root.visible)
+      return
+    // Defer so pluginId/preview bindings catch up after plugin is assigned.
+    Qt.callLater(function() {
+      if (root.visible)
+        focusScope.forceActiveFocus()
+    })
   }
 
   function sendHeart() {
@@ -140,22 +135,29 @@ Item {
     heartProc.running = true
   }
 
-  Component.onCompleted: revealWhenSettled()
-  onVisibleChanged: if (visible) revealWhenSettled()
+  Component.onCompleted: focusDetail()
+  onVisibleChanged: if (visible) root.focusDetail()
 
-  Process {
-    id: applyProc
-    onExited: function(exitCode) {
+  // Absorb clicks so they don't fall through to Main's dismiss MouseArea.
+  MouseArea {
+    anchors.fill: parent
+    enabled: root.visible
+    onClicked: {}
+  }
+
+  Connections {
+    target: Plugins
+    function onAddFinished(exitCode, serial) {
+      if (serial !== root.pendingAddSerial)
+        return
+      root.pendingAddSerial = -1
       if (exitCode === 0)
         root.refreshInstalledRequested()
     }
-  }
-
-  Process {
-    id: removeProc
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function() {
+    function onRemoveFinished(exitCode, serial, payload) {
+      if (serial !== root.pendingRemoveSerial)
+        return
+      root.pendingRemoveSerial = -1
       root.refreshInstalledRequested()
     }
   }
@@ -176,7 +178,8 @@ Item {
   Item {
     id: focusScope
     anchors.fill: parent
-    visible: root.layoutSettled && !!root.pluginId
+    // Always show when the detail host is visible; plugin fields bind below.
+    visible: true
     focus: true
 
     Keys.priority: Keys.BeforeItem
@@ -227,11 +230,20 @@ Item {
         width: Math.round(parent.width * 0.58)
         clip: true
 
-        Image {
+        Rectangle {
           anchors.fill: parent
           anchors.margins: Style.space(24)
-          visible: !!root.preview
-          source: root.preview ? root.imageSource(root.preview) : ""
+          radius: Math.max(4, Style.cornerRadius - 2)
+          color: Util.alpha(root.foreground, 0.06)
+          visible: !root.previewUrl || previewImage.status === Image.Error || previewImage.status === Image.Null
+        }
+
+        Image {
+          id: previewImage
+          anchors.fill: parent
+          anchors.margins: Style.space(24)
+          visible: !!root.previewUrl && status !== Image.Error
+          source: root.previewUrl ? root.imageSource(root.previewUrl) : ""
           fillMode: Image.PreserveAspectFit
           verticalAlignment: Image.AlignTop
           horizontalAlignment: Image.AlignHCenter

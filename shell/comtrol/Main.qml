@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import "layouts" as Layouts
+import "functions"
 
 // Plugin entry: host lifecycle + layout routing + cOMtrol CLI gateway.
 Item {
@@ -24,7 +25,9 @@ Item {
   property string pendingDomain: ""
   property string pendingMode: ""
   property int searchSerial: 0
+  property int localPluginsSerial: 0
   property bool refreshPackagesAfterRemove: false
+  property bool suppressDismissClick: false
 
   readonly property bool usePreviewTheme: showingResults
     && !loading
@@ -150,17 +153,31 @@ Item {
     if (root.pendingDomain === "packages" || root.pendingDomain === "aurs")
       return root.jsonField(item, "description")
 
-    if (root.pendingDomain !== "plugins" || root.pendingMode !== "web")
+    if (root.pendingDomain !== "plugins")
       return ""
 
-    var version = root.jsonField(item, "version")
+    if (root.pendingMode === "local") {
+      var version = root.jsonField(item, "version")
+      var source = root.jsonField(item, "source")
+      var parts = []
+      if (version)
+        parts.push(version)
+      if (source === "first_party")
+        parts.push("system")
+      return parts.join("  ")
+    }
+
+    if (root.pendingMode !== "web")
+      return ""
+
+    var webVersion = root.jsonField(item, "version")
     var repo = root.jsonField(item, "repo")
-    var parts = []
-    if (version)
-      parts.push(version)
+    var webParts = []
+    if (webVersion)
+      webParts.push(webVersion)
     if (repo)
-      parts.push(repo)
-    return parts.join("  ")
+      webParts.push(repo)
+    return webParts.join("  ")
   }
 
   function resultItemId(item, index) {
@@ -266,6 +283,7 @@ Item {
       if (searchProcess.running)
         searchProcess.running = false
       root.searchSerial += 1
+      root.localPluginsSerial += 1
       root.loading = false
       cardMenu.clearPendingAction()
       return
@@ -291,6 +309,33 @@ Item {
       cardMenu.prepareForResults()
       previewBoot.loadUnlocks()
       Qt.callLater(function() { previewBoot.focusCarousel() })
+      return
+    }
+
+    if (domain === "plugins" && mode === "web") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = true
+      root.loading = true
+      root.resultRows = []
+      cardMenu.prepareForResults()
+      browsePlugins.loadCatalog()
+      return
+    }
+
+    if (domain === "plugins" && mode === "local") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = false
+      root.loading = true
+      root.resultRows = []
+      cardMenu.markActionLoading(domain, mode)
+      // Align before listInstalled() — scan can finish quickly and emit
+      // installedListed before this function returns.
+      root.localPluginsSerial = Plugins.installedSerial + 1
+      Plugins.listInstalled()
       return
     }
 
@@ -328,9 +373,6 @@ Item {
       searchProcess.running = false
       searchProcess.running = true
     }
-
-    if (domain === "plugins" && mode === "web")
-      browsePlugins.refreshInstalled()
   }
 
   function finishSearch() {
@@ -356,11 +398,6 @@ Item {
 
       if (root.pendingDomain === "background") {
         previewBackground.loadFromData(data)
-        return rows
-      }
-
-      if (root.pendingDomain === "plugins" && root.pendingMode === "web") {
-        browsePlugins.loadFromData(data)
         return rows
       }
 
@@ -390,11 +427,47 @@ Item {
     return rows
   }
 
+  function pluginsToResultRows(plugins) {
+    var rows = []
+    var list = plugins || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      rows.push({
+        itemId: root.resultItemId(item, i),
+        label: root.resultLabel(item),
+        detail: root.resultDetail(item),
+        icon: "󰐱",
+        kind: "result",
+        domain: "plugins",
+        mode: root.pendingMode || "local"
+      })
+    }
+    return rows
+  }
+
+  function applyLocalPluginsList(plugins) {
+    if (root.pendingDomain !== "plugins" || root.pendingMode !== "local")
+      return
+    if (Plugins.installedSerial !== root.localPluginsSerial)
+      return
+    root.resultRows = root.pluginsToResultRows(plugins)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
   function openPluginDetail(plugin) {
     if (!plugin)
       return
-    root.selectedPlugin = browsePlugins.pluginWithInstalled(plugin)
+    var next = browsePlugins.pluginWithInstalled(plugin)
+    if (!next || !String(next.id || ""))
+      return
+    // Prevent the opening click from falling through to the scrim MouseArea.
+    root.suppressDismissClick = true
+    root.selectedPlugin = next
     Qt.callLater(function() {
+      root.suppressDismissClick = false
       if (root.usePluginDetail)
         pluginDetail.focusDetail()
     })
@@ -551,7 +624,14 @@ Item {
 
     MouseArea {
       anchors.fill: parent
-      onClicked: root.useFullscreenLayout ? root.goBack() : root.dismiss()
+      onClicked: {
+        if (root.suppressDismissClick)
+          return
+        if (root.useFullscreenLayout)
+          root.goBack()
+        else
+          root.dismiss()
+      }
     }
 
     Layouts.PreviewTheme {
@@ -589,24 +669,42 @@ Item {
       onPluginActivated: function(plugin) { root.openPluginDetail(plugin) }
       onDismissRequested: root.dismiss()
       onInstalledIdsChanged: root.syncSelectedPluginInstalled()
+      onCatalogFinished: {
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+      onCatalogFailed: function(message) {
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "Plugin catalog failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
     }
 
     Layouts.PluginDetail {
       id: pluginDetail
       anchors.fill: parent
       visible: root.usePluginDetail
-      plugin: root.selectedPlugin || ({})
+      // Keep this as a binding only — never assign pluginDetail.plugin from JS.
+      plugin: root.selectedPlugin ? root.selectedPlugin : ({})
       onBackRequested: root.goBack()
       onDismissRequested: root.dismiss()
       onRefreshInstalledRequested: browsePlugins.refreshInstalled()
       onHeartSentFor: function(pluginId) {
         browsePlugins.bumpHearts(pluginId)
-        if (root.selectedPlugin && String(root.selectedPlugin.id || "") === String(pluginId || "")) {
-          var next = ({})
-          for (var k in root.selectedPlugin)
-            next[k] = root.selectedPlugin[k]
-          next.hearts = Number(next.hearts || 0) + 1
-          root.selectedPlugin = next
+        if (root.selectedPlugin && String(root.selectedPlugin["id"] || root.selectedPlugin.id || "") === String(pluginId || "")) {
+          var next = browsePlugins.pluginWithInstalled(root.selectedPlugin)
+          if (next) {
+            next.hearts = Number(next.hearts || 0) + 1
+            root.selectedPlugin = next
+          }
         }
       }
     }
@@ -627,6 +725,13 @@ Item {
       onActionRequested: function(domain, mode, title) { root.runComtrol(domain, mode, title) }
       onLiveSearchRequested: rustSearchTimer.restart()
       onRemovePackageRequested: function(name) { root.removePackage(name) }
+    }
+
+    Connections {
+      target: Plugins
+      function onInstalledListed(plugins) {
+        root.applyLocalPluginsList(plugins)
+      }
     }
   }
 }

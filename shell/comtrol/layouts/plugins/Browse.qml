@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Io
 import qs.Commons
+import "../../functions"
 
 // Plugin catalog grid for Plugins → Add — fixed preview size, as many columns as fit.
 Item {
@@ -13,6 +14,7 @@ Item {
   property int selectedIndex: 0
   property bool layoutSettled: false
   property int installedSerial: 0
+  property int catalogSerial: 0
 
   property color dimColor: Color.background
   property color foreground: Color.menu.text
@@ -39,13 +41,10 @@ Item {
   signal indexChanged(int index)
   signal dismissRequested()
   signal installedIdsChanged()
+  signal catalogFinished()
+  signal catalogFailed(string message)
 
-  function runScript() {
-    var url = Qt.resolvedUrl("../../run.sh").toString()
-    if (url.indexOf("file://") === 0)
-      url = url.substring(7)
-    return url
-  }
+  property bool catalogLoading: false
 
   function jsonField(obj, key) {
     if (!obj)
@@ -61,8 +60,30 @@ Item {
     root.installedPluginIds = ({})
     root.filterText = ""
     root.selectedIndex = 0
-    if (installedProc.running)
-      installedProc.running = false
+    root.catalogLoading = false
+    root.catalogSerial += 1
+    root.installedSerial += 1
+    Plugins.cancel()
+  }
+
+  function loadCatalog() {
+    root.catalogLoading = true
+    root.plugins = []
+    // Plugins.loadCatalog() may finish synchronously from cache and emit
+    // before this function returns — align serials first or we drop the result
+    // and Main stays stuck on loading.
+    root.catalogSerial = Plugins.catalogSerial + 1
+    root.installedSerial = Plugins.installedSerial + 1
+    Plugins.loadCatalog()
+  }
+
+  function applyCatalogPayload(payload, fromCache) {
+    var list = []
+    if (payload && payload.plugins && payload.plugins.length !== undefined)
+      list = payload.plugins
+    else if (payload && payload.length !== undefined)
+      list = payload
+    root.loadFromData(list)
   }
 
   function loadFromData(data) {
@@ -108,12 +129,7 @@ Item {
   }
 
   function refreshInstalled() {
-    root.installedSerial += 1
-    installedProc.serial = root.installedSerial
-    if (installedProc.running)
-      installedProc.running = false
-    installedProc.command = [root.runScript(), "-v", "-plugin"]
-    installedProc.running = true
+    root.installedSerial = Plugins.listInstalled()
   }
 
   function applyInstalledFlags() {
@@ -121,11 +137,10 @@ Item {
     var list = root.plugins || []
     var next = []
     for (var i = 0; i < list.length; i++) {
-      var p = list[i] || {}
-      var copy = ({})
-      for (var k in p)
-        copy[k] = p[k]
-      copy.installed = !!ids[String(p.id || "")]
+      var copy = root.clonePlugin(list[i])
+      if (!copy)
+        continue
+      copy.installed = !!ids[String(copy.id || "")]
       next.push(copy)
     }
     root.plugins = next
@@ -146,40 +161,83 @@ Item {
     root.plugins = list.slice()
   }
 
-  function pluginWithInstalled(plugin) {
+  function clonePlugin(plugin) {
     if (!plugin)
       return null
-    var next = ({})
-    for (var k in plugin)
-      next[k] = plugin[k]
-    next.installed = !!root.installedPluginIds[String(plugin.id || "")]
+    var tags = plugin.tags || plugin["tags"] || []
+    var tagList = []
+    if (tags && tags.length !== undefined) {
+      for (var i = 0; i < tags.length; i++)
+        tagList.push(String(tags[i]))
+    }
+    var preview = root.jsonField(plugin, "preview")
+    if (!preview)
+      preview = root.jsonField(plugin, "preview_image")
+    var id = root.jsonField(plugin, "id")
+    return {
+      id: id,
+      name: root.jsonField(plugin, "name"),
+      version: root.jsonField(plugin, "version"),
+      author: root.jsonField(plugin, "author"),
+      repo: root.jsonField(plugin, "repo"),
+      description: root.jsonField(plugin, "description"),
+      category: root.jsonField(plugin, "category"),
+      source_type: root.jsonField(plugin, "source_type") || root.jsonField(plugin, "sourceType"),
+      preview: preview,
+      preview_image: preview,
+      install_command: root.jsonField(plugin, "install_command"),
+      install_available: !!(plugin.install_available || plugin["install_available"]),
+      tags: tagList,
+      hearts: Number(plugin.hearts || plugin["hearts"] || 0),
+      stars: Number(plugin.stars || plugin["stars"] || 0),
+      views: Number(plugin.views || plugin["views"] || 0),
+      copies: Number(plugin.copies || plugin["copies"] || 0),
+      installed: !!(plugin.installed || plugin["installed"]),
+      mode: String(plugin.mode || "web")
+    }
+  }
+
+  function pluginWithInstalled(plugin) {
+    var next = root.clonePlugin(plugin)
+    if (!next)
+      return null
+    next.installed = !!root.installedPluginIds[String(next.id || "")]
     return next
   }
 
-  Process {
-    id: installedProc
-    property int serial: 0
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (installedProc.serial !== root.installedSerial)
-          return
-        var ids = ({})
-        try {
-          var data = JSON.parse(String(text || "[]"))
-          if (data && data.length !== undefined) {
-            for (var i = 0; i < data.length; i++) {
-              var id = root.jsonField(data[i] || {}, "id")
-              if (id)
-                ids[id] = true
-            }
-          }
-        } catch (e) {
-          ids = ({})
-        }
-        root.installedPluginIds = ids
-        root.applyInstalledFlags()
+  Connections {
+    target: Plugins
+    function onCatalogPayload(payload, fromCache) {
+      if (Plugins.catalogSerial !== root.catalogSerial)
+        return
+      root.applyCatalogPayload(payload, fromCache)
+    }
+    function onCatalogFinished() {
+      if (Plugins.catalogSerial !== root.catalogSerial)
+        return
+      if (root.catalogLoading) {
+        root.catalogLoading = false
+        root.catalogFinished()
       }
+    }
+    function onCatalogFailed(message) {
+      if (Plugins.catalogSerial !== root.catalogSerial)
+        return
+      root.catalogLoading = false
+      root.catalogFailed(message)
+    }
+    function onInstalledListed(plugins) {
+      if (Plugins.installedSerial !== root.installedSerial)
+        return
+      var ids = ({})
+      var list = plugins || []
+      for (var i = 0; i < list.length; i++) {
+        var id = root.jsonField(list[i] || {}, "id")
+        if (id)
+          ids[id] = true
+      }
+      root.installedPluginIds = ids
+      root.applyInstalledFlags()
     }
   }
 
@@ -215,14 +273,19 @@ Item {
 
   onPluginsChanged: {
     root.layoutSettled = false
-    root.selectedIndex = 0
+    var filtered = root.filteredPlugins || []
+    if (root.selectedIndex >= filtered.length)
+      root.selectedIndex = Math.max(0, filtered.length - 1)
+    if (filtered.length > 0 && root.selectedIndex < 0)
+      root.selectedIndex = 0
     root.revealWhenSettled()
   }
 
   onFilterTextChanged: {
-    if (root.selectedIndex >= filteredPlugins.length)
-      root.selectedIndex = Math.max(0, filteredPlugins.length - 1)
-    if (filteredPlugins.length > 0 && root.selectedIndex < 0)
+    var filtered = root.filteredPlugins || []
+    if (root.selectedIndex >= filtered.length)
+      root.selectedIndex = Math.max(0, filtered.length - 1)
+    if (filtered.length > 0 && root.selectedIndex < 0)
       root.selectedIndex = 0
   }
 
@@ -268,8 +331,15 @@ Item {
     if (root.selectedIndex < 0 || root.selectedIndex >= filteredPlugins.length)
       return
     var plugin = filteredPlugins[root.selectedIndex]
-    if (plugin)
-      root.pluginActivated(plugin)
+    if (!plugin)
+      return
+    // Defer so the grid click finishes before Browse hides; otherwise the
+    // release can hit Main's dismiss MouseArea and immediately goBack().
+    var payload = root.clonePlugin(plugin)
+    Qt.callLater(function() {
+      if (payload)
+        root.pluginActivated(payload)
+    })
   }
 
   function revealWhenSettled() {
