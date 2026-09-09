@@ -35,6 +35,7 @@ Item {
   property string pendingMode: ""
   property int searchSerial: 0
   property int installedPluginsSerial: 0
+  property bool refreshPackagesAfterRemove: false
 
   readonly property var appLibrary: root.shell ? root.shell.appLibrary : null
   // Local icon-name → path index. Third-party menus only get a proxy AppLibrary
@@ -132,13 +133,14 @@ Item {
     "apps": {
       title: "Apps",
       rows: [
-        { itemId: "applications", label: "Applications", icon: "󰀻", kind: "menu" },
+        { itemId: "applications", label: "Desktop", icon: "󰀻", kind: "menu" },
         { itemId: "packages", label: "Packages", icon: "󰏖", kind: "menu" },
-        { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "menu" }
+        { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "menu" },
+        { itemId: "webapps", label: "Web Apps", icon: "󰖟", kind: "menu" }
       ]
     },
     "applications": {
-      title: "Applications",
+      title: "Desktop",
       rows: []
     },
     "plugins": {
@@ -160,6 +162,12 @@ Item {
       rows: [
         { itemId: "aurs.web", label: "Install", icon: "󰐕", kind: "action", domain: "aurs", mode: "web" },
         { itemId: "aurs.local", label: "Installed", icon: "󰉋", kind: "action", domain: "aurs", mode: "local" }
+      ]
+    },
+    "webapps": {
+      title: "Web Apps",
+      rows: [
+        { itemId: "webapps.local", label: "Installed", icon: "󰉋", kind: "action", domain: "webapps", mode: "local" }
       ]
     }
   })
@@ -209,6 +217,7 @@ Item {
     var fullName = root.jsonField(item, "full_name")
     var repo = root.jsonField(item, "repo")
     var source = root.jsonField(item, "source")
+    var version = root.jsonField(item, "version")
 
     // Plugin catalog: prefer display name (repo is a URL, not a pacman repo).
     if (root.pendingDomain === "plugins") {
@@ -217,6 +226,13 @@ Item {
       if (itemId)
         return itemId
       return "?"
+    }
+
+    if (root.pendingDomain === "packages") {
+      var pkgName = (repo && name) ? (repo + "/" + name) : (name || itemId || "?")
+      if (pkgName !== "?" && version)
+        return pkgName + "  " + version
+      return pkgName
     }
 
     // pacman web results: repo/name
@@ -234,6 +250,10 @@ Item {
   function resultDetail(item) {
     if (!item || typeof item !== "object")
       return ""
+
+    if (root.pendingDomain === "packages")
+      return root.jsonField(item, "description")
+
     if (root.pendingDomain !== "plugins" || root.pendingMode !== "web")
       return ""
 
@@ -453,7 +473,7 @@ Item {
 
   // Desktop apps via Omarchy AppLibrary (same source as omarchy.menu Apps),
   // with a DesktopEntries fallback if the shell proxy is unavailable.
-  // Empty query lists the full catalog (Applications menu); non-empty filters it.
+  // Empty query lists the full catalog (Desktop menu); non-empty filters it.
   function collectApplicationRows(query, limit) {
     var out = []
     var q = String(query || "").trim()
@@ -561,7 +581,7 @@ Item {
     if (root.showingResults) {
       rows = (root.currentMenu().rows || []).slice()
     } else if (root.activeMenu === "applications") {
-      // Dedicated Applications menu: full desktop catalog with real icons.
+      // Dedicated Desktop menu: full desktop catalog with real icons.
       rows = root.collectApplicationRows(root.filterText.trim(), 0)
     } else if (q) {
       // Search current menu + nested submenus, then desktop apps (AppLibrary).
@@ -758,8 +778,17 @@ Item {
       argv = [root.runScript(), "-v", root.domainFlag(domain)]
     else
       argv = [root.runScript(), "-s", root.domainFlag(domain), "-w"]
-    searchProcess.command = argv
-    searchProcess.running = true
+
+    // exec() always restarts; plain running=true can no-op when argv is unchanged.
+    if (typeof searchProcess.exec === "function") {
+      searchProcess.exec(argv)
+    } else {
+      if (searchProcess.running)
+        searchProcess.running = false
+      searchProcess.command = argv
+      searchProcess.running = false
+      searchProcess.running = true
+    }
 
     if (domain === "plugins" && mode === "web")
       root.refreshInstalledPlugins()
@@ -1046,6 +1075,33 @@ Item {
     themeRemoveProc.running = true
   }
 
+  function removePackage(name) {
+    if (!name)
+      return
+    var id = String(name)
+
+    // Clear the list and show loading until Rust remove + Installed refetch finish.
+    root.refreshPackagesAfterRemove = true
+    root.loading = true
+    root.filterText = ""
+    root.resultRows = []
+    root.selectedIndex = 0
+    root.cursorActive = false
+    root.rebuildDisplay()
+
+    // Rust: cOMtrol -r -package <name>
+    var argv = [root.runScript(), "-r", "-package", id]
+    if (typeof themeRemoveProc.exec === "function") {
+      themeRemoveProc.exec(argv)
+    } else {
+      if (themeRemoveProc.running)
+        themeRemoveProc.running = false
+      themeRemoveProc.command = argv
+      themeRemoveProc.running = false
+      themeRemoveProc.running = true
+    }
+  }
+
   ListModel { id: displayModel }
 
   Process {
@@ -1058,7 +1114,19 @@ Item {
 
   Process {
     id: themeRemoveProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
+      if (root.refreshPackagesAfterRemove) {
+        root.refreshPackagesAfterRemove = false
+        // Refetch Installed packages from Rust after every remove.
+        Qt.callLater(function() {
+          if (!root.opened)
+            return
+          root.runComtrol("packages", "local", root.resultsTitle || "Installed")
+        })
+        return
+      }
       // Refresh local theme list after Rust remove (success or partial).
       if (root.pendingDomain === "themes" && root.pendingMode === "local")
         root.runComtrol("themes", "local", "Installed")
@@ -1313,6 +1381,18 @@ Item {
             if (root.cursorActive) root.activateIndex(root.selectedIndex)
             else if (displayModel.count > 0) root.cursorActive = true
             event.accepted = true
+          } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
+            if (root.showingResults
+                && root.pendingDomain === "packages"
+                && root.pendingMode === "local"
+                && root.cursorActive
+                && root.selectedIndex >= 0
+                && root.selectedIndex < displayModel.count) {
+              var row = displayModel.get(root.selectedIndex)
+              if (row && row.kind === "result" && row.itemId)
+                root.removePackage(row.itemId)
+            }
+            event.accepted = true
           } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127 && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
             root.setFilter(root.filterText + event.text)
             event.accepted = true
@@ -1375,6 +1455,10 @@ Item {
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
               readonly property bool hasDetail: detail.length > 0
               readonly property bool isApp: row.kind === "app"
+              readonly property bool showPackageRemove: row.kind === "result"
+                && root.pendingDomain === "packages"
+                && root.pendingMode === "local"
+              readonly property int trailingWidth: showPackageRemove ? Style.space(72) : Style.space(16)
 
               width: ListView.view.width
               height: hasDetail ? root.detailRowHeight : root.rowHeight
@@ -1432,7 +1516,7 @@ Item {
                 Column {
                   width: Math.max(
                     Style.space(40),
-                    parent.width - Style.space(36) - Style.space(12) - Style.space(16) - Style.space(24)
+                    parent.width - Style.space(36) - Style.space(12) - row.trailingWidth - Style.space(24)
                   )
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(2)
@@ -1460,17 +1544,35 @@ Item {
                   }
                 }
 
-                Text {
-                  textFormat: Text.PlainText
-                  text: (row.kind === "menu" || row.kind === "action") ? "›" : ""
-                  color: row.hasCursor ? root.selectedText : root.foreground
-                  opacity: (row.kind === "menu" || row.kind === "action") ? 0.36 : 0
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  width: Style.space(16)
+                Item {
+                  width: row.trailingWidth
                   height: parent.height
-                  verticalAlignment: Text.AlignVCenter
-                  horizontalAlignment: Text.AlignRight
+
+                  Text {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    visible: !row.showPackageRemove
+                    text: (row.kind === "menu" || row.kind === "action") ? "›" : ""
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    opacity: (row.kind === "menu" || row.kind === "action") ? 0.36 : 0
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignRight
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    visible: row.showPackageRemove
+                    text: "Remove"
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    opacity: 0.72
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignRight
+                  }
                 }
               }
 
@@ -1486,6 +1588,28 @@ Item {
                   root.cursorActive = true
                   root.selectedIndex = index
                   root.activateIndex(index)
+                }
+              }
+
+              MouseArea {
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                width: row.trailingWidth
+                height: parent.height
+                visible: row.showPackageRemove
+                enabled: row.showPackageRemove
+                z: 2
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (containsMouse) {
+                  root.cursorActive = true
+                  root.selectedIndex = index
+                }
+                onClicked: {
+                  root.cursorActive = true
+                  root.selectedIndex = index
+                  root.removePackage(row.itemId)
                 }
               }
             }

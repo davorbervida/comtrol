@@ -85,6 +85,7 @@ fn web_items(query: &str) -> Vec<Package> {
             });
         }
 
+        packages.sort_by(|a, b| a.name.cmp(&b.name));
         return packages;
     }
 
@@ -135,6 +136,7 @@ fn web_items(query: &str) -> Vec<Package> {
         });
     }
 
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
     packages
 }
 

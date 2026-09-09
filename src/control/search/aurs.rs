@@ -121,5 +121,6 @@ fn web_items(query: &str) -> Vec<AurPackage> {
         });
     }
 
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
     packages
 }

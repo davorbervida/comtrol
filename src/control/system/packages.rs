@@ -83,6 +83,7 @@ pub(crate) fn collect() -> Vec<Package> {
         });
     }
 
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
     packages
 }
 
