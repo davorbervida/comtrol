@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Shapes
-import Quickshell.Io
 import qs.Commons
+import "../../functions"
 
 // Omarchy-style skewed coverflow for local theme previews (mirrors omarchy.image-picker).
 Item {
@@ -14,6 +14,9 @@ Item {
   property string filterText: ""
   property int selectedIndex: 0
   property bool layoutSettled: false
+  property int pendingInstallSerial: -1
+  property int pendingRemoveSerial: -1
+  property int pendingApplySerial: -1
 
   property color dimColor: Color.background
   property color foreground: Color.imagePicker.text
@@ -36,13 +39,6 @@ Item {
   signal dismissRequested()
   signal refreshRequested()
 
-  function runScript() {
-    var url = Qt.resolvedUrl("../../run.sh").toString()
-    if (url.indexOf("file://") === 0)
-      url = url.substring(7)
-    return url
-  }
-
   function jsonField(obj, key) {
     if (!obj)
       return ""
@@ -56,13 +52,12 @@ Item {
     root.themes = []
     root.filterText = ""
     root.selectedIndex = 0
-    if (applyProc.running)
-      applyProc.running = false
-    if (removeProc.running)
-      removeProc.running = false
+    root.pendingInstallSerial = -1
+    root.pendingRemoveSerial = -1
+    root.pendingApplySerial = -1
   }
 
-  // Parse cOMtrol JSON array into coverflow model.
+  // Parse Themes singleton payloads into coverflow model.
   // Do not assign `mode` here — Menu binds it (`mode: pendingMode`). Writing
   // that property from JS throws and aborts the load.
   function loadFromData(items) {
@@ -93,23 +88,19 @@ Item {
   function applyTheme(theme) {
     if (!theme)
       return
-    if (applyProc.running)
-      applyProc.running = false
 
     // Local: apply installed theme. Web: install from git (also applies).
     if (root.mode === "web" || theme.mode === "web") {
       var repo = theme.repo || ""
       if (!repo)
         return
-      applyProc.command = ["omarchy-theme-install", String(repo)]
-      applyProc.running = true
+      root.pendingInstallSerial = Themes.install(String(repo))
       return
     }
 
     if (!theme.name)
       return
-    applyProc.command = ["omarchy-theme-set", String(theme.name)]
-    applyProc.running = true
+    root.pendingApplySerial = Themes.apply(String(theme.name))
   }
 
   function removeTheme(theme) {
@@ -117,21 +108,25 @@ Item {
       return
     if (root.mode !== "local" && theme.mode !== "local")
       return
-    if (removeProc.running)
-      removeProc.running = false
-    removeProc.command = [root.runScript(), "-r", "-theme", String(theme.name)]
-    removeProc.running = true
+    root.pendingRemoveSerial = Themes.remove(String(theme.name))
   }
 
-  Process {
-    id: applyProc
-  }
-
-  Process {
-    id: removeProc
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function() {
+  Connections {
+    target: Themes
+    function onInstallFinished(exitCode, serial, themeName) {
+      if (serial !== root.pendingInstallSerial)
+        return
+      root.pendingInstallSerial = -1
+    }
+    function onApplyFinished(exitCode, serial) {
+      if (serial !== root.pendingApplySerial)
+        return
+      root.pendingApplySerial = -1
+    }
+    function onRemoveFinished(exitCode, serial, payload) {
+      if (serial !== root.pendingRemoveSerial)
+        return
+      root.pendingRemoveSerial = -1
       if (root.mode === "local")
         root.refreshRequested()
     }

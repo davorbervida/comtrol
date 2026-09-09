@@ -26,6 +26,9 @@ Item {
   property string pendingMode: ""
   property int searchSerial: 0
   property int localPluginsSerial: 0
+  property int localThemesSerial: 0
+  property int webThemesSerial: 0
+  property int backgroundsSerial: 0
   property bool refreshPackagesAfterRemove: false
   property bool suppressDismissClick: false
 
@@ -339,6 +342,45 @@ Item {
       return
     }
 
+    if (domain === "themes" && mode === "local") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = true
+      root.loading = true
+      root.resultRows = []
+      cardMenu.prepareForResults()
+      root.localThemesSerial = Themes.installedSerial + 1
+      Themes.listInstalled()
+      return
+    }
+
+    if (domain === "themes" && mode === "web") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = true
+      root.loading = true
+      root.resultRows = []
+      cardMenu.prepareForResults()
+      root.webThemesSerial = Themes.webSerial + 1
+      Themes.loadWeb("")
+      return
+    }
+
+    if (domain === "background") {
+      if (searchProcess.running)
+        searchProcess.running = false
+      root.searchSerial += 1
+      root.showingResults = true
+      root.loading = true
+      root.resultRows = []
+      cardMenu.prepareForResults()
+      root.backgroundsSerial = Backgrounds.listSerial + 1
+      Backgrounds.list(mode || "current")
+      return
+    }
+
     var fullscreen = root.usesFullscreenResults(domain, mode)
     if (fullscreen) {
       root.showingResults = true
@@ -451,6 +493,44 @@ Item {
     if (Plugins.installedSerial !== root.localPluginsSerial)
       return
     root.resultRows = root.pluginsToResultRows(plugins)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function applyLocalThemesList(themes) {
+    if (root.pendingDomain !== "themes" || root.pendingMode !== "local")
+      return
+    if (Themes.installedSerial !== root.localThemesSerial)
+      return
+    previewTheme.loadFromData(themes || [])
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function applyWebThemesList(themes) {
+    if (root.pendingDomain !== "themes" || root.pendingMode !== "web")
+      return
+    if (Themes.webSerial !== root.webThemesSerial)
+      return
+    previewTheme.loadFromData(themes || [])
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function applyBackgroundsList(backgrounds, mode) {
+    if (root.pendingDomain !== "background")
+      return
+    if (Backgrounds.listSerial !== root.backgroundsSerial)
+      return
+    if (mode && String(mode) !== String(root.pendingMode || "current"))
+      return
+    previewBackground.loadFromData(backgrounds || [])
     if (root.loading) {
       root.finishSearch()
       Qt.callLater(root.focusActiveLayout)
@@ -731,6 +811,40 @@ Item {
       target: Plugins
       function onInstalledListed(plugins) {
         root.applyLocalPluginsList(plugins)
+      }
+    }
+
+    Connections {
+      target: Themes
+      function onLocalListed(themes) {
+        root.applyLocalThemesList(themes)
+      }
+      function onWebListed(themes, fromCache) {
+        root.applyWebThemesList(themes)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "themes" || root.pendingMode !== "web")
+          return
+        if (Themes.webSerial !== root.webThemesSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "Theme catalog failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+    }
+
+    Connections {
+      target: Backgrounds
+      function onListed(backgrounds, mode) {
+        root.applyBackgroundsList(backgrounds, mode)
       }
     }
   }

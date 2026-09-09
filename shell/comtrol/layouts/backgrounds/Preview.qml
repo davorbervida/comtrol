@@ -3,6 +3,7 @@ import QtQuick.Effects
 import QtQuick.Shapes
 import Quickshell.Io
 import qs.Commons
+import "../../functions"
 
 // Skewed coverflow for background images (listing only — mirrors PreviewTheme visuals).
 Item {
@@ -13,6 +14,7 @@ Item {
   property string mode: "current"
   property int selectedIndex: 0
   property bool layoutSettled: false
+  property int pendingRemoveSerial: -1
 
   property color dimColor: Color.background
   property color selectedBorder: Color.imagePicker.selectedBorder
@@ -30,13 +32,6 @@ Item {
   signal indexChanged(int index)
   signal refreshRequested()
 
-  function runScript() {
-    var url = Qt.resolvedUrl("../../run.sh").toString()
-    if (url.indexOf("file://") === 0)
-      url = url.substring(7)
-    return url
-  }
-
   function jsonField(obj, key) {
     if (!obj)
       return ""
@@ -49,10 +44,9 @@ Item {
   function clear() {
     root.backgrounds = []
     root.selectedIndex = 0
+    root.pendingRemoveSerial = -1
     if (applyProc.running)
       applyProc.running = false
-    if (removeProc.running)
-      removeProc.running = false
   }
 
   function loadFromData(items) {
@@ -86,23 +80,37 @@ Item {
     var path = String(background.path || background["path"] || "")
     if (!path)
       return
-    if (removeProc.running)
-      removeProc.running = false
-    removeProc.command = [root.runScript(), "-r", "-background", path]
-    removeProc.running = true
+    root.pendingRemoveSerial = Backgrounds.remove(path)
+    if (root.pendingRemoveSerial < 0)
+      return
+    // Drop from UI immediately; refresh reconciles after Process finishes.
+    var next = []
+    var list = root.backgrounds || []
+    for (var i = 0; i < list.length; i++) {
+      if (String((list[i] && list[i].path) || "") === path)
+        continue
+      next.push(list[i])
+    }
+    var prev = root.selectedIndex
+    root.backgrounds = next
+    if (next.length === 0)
+      root.selectedIndex = 0
+    else if (prev >= next.length)
+      root.selectedIndex = next.length - 1
+  }
+
+  Connections {
+    target: Backgrounds
+    function onRemoveFinished(exitCode, serial, payload) {
+      if (serial !== root.pendingRemoveSerial)
+        return
+      root.pendingRemoveSerial = -1
+      root.refreshRequested()
+    }
   }
 
   Process {
     id: applyProc
-  }
-
-  Process {
-    id: removeProc
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function() {
-      root.refreshRequested()
-    }
   }
 
   readonly property var imageArray: {
@@ -219,7 +227,7 @@ Item {
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
           root.activateSelected()
           event.accepted = true
-        } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier)) {
+        } else if (event.key === Qt.Key_R && ((event.modifiers & Qt.ControlModifier) || (event.modifiers & Qt.ShiftModifier))) {
           root.removeSelected()
           event.accepted = true
         } else if (event.key === Qt.Key_Backspace) {
