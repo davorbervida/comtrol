@@ -84,6 +84,14 @@ Item {
     id: installMenu
   }
 
+  Power {
+    id: powerMenu
+    onChanged: {
+      if (root.activeMenu === powerMenu.itemId)
+        root.rebuildDisplay()
+    }
+  }
+
   Apperiance_Fonts {
     id: appearanceFonts
     background: root.background
@@ -128,7 +136,8 @@ Item {
           { itemId: "appearance", label: "Appearance", icon: "", kind: "menu" },
           { itemId: "apps", label: "Apps", icon: "󰀻", kind: "menu" },
           { itemId: "plugins", label: "Plugins", icon: "󰐱", kind: "action", domain: "plugins", mode: "local" },
-          installMenu.rootRow
+          installMenu.rootRow,
+          powerMenu.rootRow
         ]
       },
       "appearance": {
@@ -165,6 +174,7 @@ Item {
       },
     }
     tree[installMenu.itemId] = installMenu.menu
+    tree[powerMenu.itemId] = powerMenu.menu
     tree[appearanceFonts.itemId] = appearanceFonts.menu
     tree[appearanceFonts.changeItemId] = appearanceFonts.changeMenu
     tree[appearanceDesktop.itemId] = appearanceDesktop.menu
@@ -360,7 +370,8 @@ Item {
           detail: pathLabels.join(" › "),
           domain: String(row.domain || ""),
           mode: String(row.mode || ""),
-          status: String(row.status || "")
+          status: String(row.status || ""),
+          command: String(row.command || "")
         })
         if (kind === "menu" && itemId)
           walk(itemId, pathLabels.concat([label]))
@@ -567,7 +578,8 @@ Item {
         detail: String(row.detail || ""),
         domain: String(row.domain || ""),
         mode: String(row.mode || ""),
-        status: String(row.status || "")
+        status: String(row.status || ""),
+        command: String(row.command || "")
       })
     }
 
@@ -620,6 +632,8 @@ Item {
         if (root.appLibrary)
           root.appLibrary.refreshIcons()
       }
+      if (row.itemId === powerMenu.itemId)
+        powerMenu.load()
       if (row.itemId === appearanceDesktop.itemId
           || row.itemId === appearanceDesktop.opacityItemId)
         appearanceDesktop.loadDesktop()
@@ -646,6 +660,11 @@ Item {
     }
     if (row.kind === "bar-position") {
       appearanceDesktop.setPosition(row.itemId)
+      return
+    }
+    if (row.kind === "power") {
+      if (powerMenu.run(row.command || ""))
+        root.dismissRequested()
       return
     }
     if (row.kind === "action" && row.domain && row.mode) {
@@ -832,6 +851,7 @@ Item {
             required property string domain
             required property string mode
             required property string status
+            required property string command
 
             readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
             readonly property bool hasDetail: detail.length > 0

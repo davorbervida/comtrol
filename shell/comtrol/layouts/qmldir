@@ -4,6 +4,7 @@ PluginDetail 1.0 plugins/Details.qml
 BackgroundPreview 1.0 backgrounds/Preview.qml
 Menu 1.0 menus/Menu.qml
 Install 1.0 menus/Install.qml
+Power 1.0 menus/Power.qml
 ApperianceFonts 1.0 menus/Apperiance_Fonts.qml
 ApperianceBoot 1.0 menus/Apperiance_Boot.qml
 ApperianceDesktop 1.0 menus/Apperiance_Desktop.qml
