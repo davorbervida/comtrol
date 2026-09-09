@@ -4,7 +4,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Appearance → Desktop: bar, blur, and per-app-group window opacity.
+// Appearance → Desktop: bar, blur, look (gaps/border/rounding/shadow), opacity.
 Item {
   id: root
 
@@ -22,6 +22,11 @@ Item {
   readonly property string positionItemId: "desktop.bar.position"
   readonly property string transparencyItemId: "desktop.bar.transparency"
   readonly property string blurItemId: "desktop.blur"
+  readonly property string gapsItemId: "desktop.look.gaps"
+  readonly property string borderItemId: "desktop.look.border"
+  readonly property string roundingItemId: "desktop.look.rounding"
+  readonly property string shadowItemId: "desktop.look.shadow"
+  readonly property string transitionsItemId: "desktop.look.transitions"
   readonly property string opacityItemId: "desktop.opacity"
   readonly property string globalOpacityItemId: "desktop.opacity.global"
   readonly property string resetOpacityItemId: "desktop.opacity.reset"
@@ -33,6 +38,14 @@ Item {
 
   readonly property int minBlur: 0
   readonly property int maxBlur: 20
+  readonly property int minGaps: 0
+  readonly property int maxGaps: 20
+  readonly property int minBorder: 0
+  readonly property int maxBorder: 10
+  readonly property int minRounding: 0
+  readonly property int maxRounding: 24
+  readonly property int minTransitions: 0
+  readonly property int maxTransitions: 1000
   readonly property int minOpacity: 50
   readonly property int maxOpacity: 100
   readonly property int sliderRowHeight: Math.max(
@@ -50,6 +63,22 @@ Item {
   property bool appliedBlurEnabled: false
   property bool haveAppliedBlurEnabled: false
 
+  property int previewGaps: -1
+  property int pendingGaps: -1
+  property int liveGaps: 5
+  property int previewBorder: -1
+  property int pendingBorder: -1
+  property int liveBorder: 2
+  property int previewRounding: -1
+  property int pendingRounding: -1
+  property int liveRounding: 0
+  property int previewTransitions: -1
+  property int pendingTransitions: -1
+  property int liveTransitions: 400
+  property bool liveShadow: false
+  property bool pendingShadow: false
+  property bool havePendingShadow: false
+
   property var opacityGroups: []
   property string activeOpacityGroupId: ""
   property string pendingOpacityGroupId: ""
@@ -65,6 +94,28 @@ Item {
       return root.previewBlur
     return Math.max(root.minBlur, Math.min(root.maxBlur, root.liveBlur))
   }
+  readonly property int displayedGaps: {
+    if (root.previewGaps >= 0)
+      return root.previewGaps
+    return Math.max(root.minGaps, Math.min(root.maxGaps, root.liveGaps))
+  }
+  readonly property int displayedBorder: {
+    if (root.previewBorder >= 0)
+      return root.previewBorder
+    return Math.max(root.minBorder, Math.min(root.maxBorder, root.liveBorder))
+  }
+  readonly property int displayedRounding: {
+    if (root.previewRounding >= 0)
+      return root.previewRounding
+    return Math.max(root.minRounding, Math.min(root.maxRounding, root.liveRounding))
+  }
+  readonly property int displayedTransitions: {
+    if (root.previewTransitions >= 0)
+      return root.previewTransitions
+    return Math.max(root.minTransitions, Math.min(root.maxTransitions, root.liveTransitions))
+  }
+  readonly property bool displayedShadow: root.havePendingShadow ? root.pendingShadow : root.liveShadow
+  readonly property string shadowLabel: root.displayedShadow ? "On" : "Off"
 
   readonly property string positionLabel: {
     var p = String(root.position || "top").toLowerCase()
@@ -103,6 +154,17 @@ Item {
         status: root.transparencyLabel
       },
       { itemId: root.blurItemId, label: "Blur", kind: "slider" },
+      { itemId: root.gapsItemId, label: "Gaps", kind: "slider" },
+      { itemId: root.borderItemId, label: "Border", kind: "slider" },
+      { itemId: root.roundingItemId, label: "Rounding", kind: "slider" },
+      { itemId: root.transitionsItemId, label: "Transitions", kind: "slider" },
+      {
+        itemId: root.shadowItemId,
+        label: "Shadow",
+        icon: "󰖨",
+        kind: "look-shadow",
+        status: root.shadowLabel
+      },
       { itemId: root.opacityItemId, label: "Opacity", icon: "󰂵", kind: "menu" }
     ]
   })
@@ -216,6 +278,17 @@ Item {
     return out
   }
 
+  function isLookSlider(itemId) {
+    var id = String(itemId || "")
+    return id === root.gapsItemId || id === root.borderItemId
+      || id === root.roundingItemId || id === root.transitionsItemId
+  }
+
+  function isDesktopSlider(itemId) {
+    var id = String(itemId || "")
+    return id === root.blurItemId || root.isLookSlider(id) || !!root.groupIdFromSlider(id)
+  }
+
   function findGroup(groupId) {
     var id = String(groupId || "")
     for (var i = 0; i < root.opacityGroups.length; i++) {
@@ -322,6 +395,55 @@ Item {
       root.previewBlur = -1
   }
 
+  function applyLookStatus(text) {
+    var parts = String(text || "").split("\t")
+    function parseIntOpt(raw, fallback) {
+      try {
+        var o = JSON.parse(raw || "{}")
+        if (o.int !== undefined && o.int !== null) {
+          var n = Math.round(Number(o.int))
+          if (isFinite(n))
+            return n
+        }
+        // gaps_* often come back as css: "5 5 5 5"
+        if (o.css !== undefined && o.css !== null) {
+          var css = String(o.css).trim().split(/\s+/)
+          var c = Math.round(Number(css[0]))
+          if (isFinite(c))
+            return c
+        }
+      } catch (e) {
+      }
+      return fallback
+    }
+    function parseBoolOpt(raw, fallback) {
+      try {
+        var o = JSON.parse(raw || "{}")
+        if (o.bool === true || o.bool === false)
+          return o.bool === true
+      } catch (e) {
+      }
+      return fallback
+    }
+    root.liveGaps = Math.max(root.minGaps, Math.min(root.maxGaps, parseIntOpt(parts[0], root.liveGaps)))
+    root.liveBorder = Math.max(root.minBorder, Math.min(root.maxBorder, parseIntOpt(parts[1], root.liveBorder)))
+    root.liveRounding = Math.max(root.minRounding, Math.min(root.maxRounding, parseIntOpt(parts[2], root.liveRounding)))
+    root.liveShadow = parseBoolOpt(parts[3], root.liveShadow)
+    root.liveTransitions = Math.max(root.minTransitions, Math.min(root.maxTransitions, parseIntOpt(parts[4], root.liveTransitions)))
+    if (root.previewGaps >= 0 && root.liveGaps === root.previewGaps)
+      root.previewGaps = -1
+    if (root.previewBorder >= 0 && root.liveBorder === root.previewBorder)
+      root.previewBorder = -1
+    if (root.previewRounding >= 0 && root.liveRounding === root.previewRounding)
+      root.previewRounding = -1
+    if (root.previewTransitions >= 0 && root.liveTransitions === root.previewTransitions)
+      root.previewTransitions = -1
+    if (root.havePendingShadow && root.pendingShadow === root.liveShadow) {
+      root.havePendingShadow = false
+    }
+    root.changed()
+  }
+
   function applyOpacityScan(text) {
     try {
       var data = JSON.parse(String(text || "{}"))
@@ -355,12 +477,18 @@ Item {
 
   function loadDesktop() {
     root.loadBlur()
+    root.loadLook()
     root.loadOpacityGroups()
   }
 
   function loadBlur() {
     if (!blurReadProc.running)
       blurReadProc.running = true
+  }
+
+  function loadLook() {
+    if (!lookReadProc.running)
+      lookReadProc.running = true
   }
 
   function loadOpacityGroups() {
@@ -402,6 +530,95 @@ Item {
 
   function adjustBlur(delta) {
     root.setBlur(root.displayedBlur + delta, true)
+  }
+
+  function clampLook(value, minV, maxV) {
+    var next = Math.round(Number(value))
+    if (!isFinite(next))
+      return minV
+    return Math.max(minV, Math.min(maxV, next))
+  }
+
+  function setGaps(value, persist) {
+    var next = root.clampLook(value, root.minGaps, root.maxGaps)
+    root.previewGaps = next
+    root.liveGaps = next
+    root.pendingGaps = next
+    liveLookTimer.restart()
+    lookPersistTimer.interval = persist ? 80 : 450
+    lookPersistTimer.restart()
+    root.changed()
+  }
+
+  function setBorder(value, persist) {
+    var next = root.clampLook(value, root.minBorder, root.maxBorder)
+    root.previewBorder = next
+    root.liveBorder = next
+    root.pendingBorder = next
+    liveLookTimer.restart()
+    lookPersistTimer.interval = persist ? 80 : 450
+    lookPersistTimer.restart()
+    root.changed()
+  }
+
+  function setRounding(value, persist) {
+    var next = root.clampLook(value, root.minRounding, root.maxRounding)
+    root.previewRounding = next
+    root.liveRounding = next
+    root.pendingRounding = next
+    liveLookTimer.restart()
+    lookPersistTimer.interval = persist ? 80 : 450
+    lookPersistTimer.restart()
+    root.changed()
+  }
+
+  function setTransitions(value, persist) {
+    var next = root.clampLook(value, root.minTransitions, root.maxTransitions)
+    // Snap to 50ms steps for a usable ms control (0 stays Off).
+    if (next > 0)
+      next = Math.round(next / 50) * 50
+    next = root.clampLook(next, root.minTransitions, root.maxTransitions)
+    root.previewTransitions = next
+    root.liveTransitions = next
+    root.pendingTransitions = next
+    liveLookTimer.restart()
+    lookPersistTimer.interval = persist ? 80 : 450
+    lookPersistTimer.restart()
+    root.changed()
+  }
+
+  function toggleShadow() {
+    var next = !root.displayedShadow
+    root.pendingShadow = next
+    root.havePendingShadow = true
+    root.liveShadow = next
+    liveLookTimer.restart()
+    lookPersistTimer.interval = 80
+    lookPersistTimer.restart()
+    root.changed()
+  }
+
+  function displayedLook(role) {
+    if (role === "gaps")
+      return root.displayedGaps
+    if (role === "border")
+      return root.displayedBorder
+    if (role === "rounding")
+      return root.displayedRounding
+    if (role === "transitions")
+      return root.displayedTransitions
+    return 0
+  }
+
+  function setLookRole(role, value, persist) {
+    if (role === "gaps")
+      root.setGaps(value, persist)
+    else if (role === "border")
+      root.setBorder(value, persist)
+    else if (role === "rounding")
+      root.setRounding(value, persist)
+    else if (role === "transitions")
+      root.setTransitions(value, persist)
   }
 
   function updateGroupValue(groupId, channel, value) {
@@ -503,6 +720,22 @@ Item {
       root.adjustBlur(delta)
       return
     }
+    if (itemId === root.gapsItemId) {
+      root.setGaps(root.displayedGaps + delta, true)
+      return
+    }
+    if (itemId === root.borderItemId) {
+      root.setBorder(root.displayedBorder + delta, true)
+      return
+    }
+    if (itemId === root.roundingItemId) {
+      root.setRounding(root.displayedRounding + delta, true)
+      return
+    }
+    if (itemId === root.transitionsItemId) {
+      root.setTransitions(root.displayedTransitions + (delta > 0 ? 50 : -50), true)
+      return
+    }
     var gid = root.groupIdFromSlider(itemId)
     if (!gid)
       return
@@ -542,6 +775,33 @@ Item {
       blurPersistTimer.interval = 1
       blurPersistTimer.restart()
     }
+  }
+
+  function lookLua(gaps, border, rounding, shadow, transitions) {
+    var gout = gaps <= 0 ? 0 : gaps * 2
+    var ms = Math.max(0, Math.round(Number(transitions) || 0))
+    var enabled = ms > 0
+    // Hyprland animation SPEED unit ≈ 100ms.
+    var speed = enabled ? (Math.max(1, Math.round((ms / 100) * 100) / 100)) : 1
+    var animConfig = "hl.config({ animations = { enabled = " + (enabled ? "true" : "false") + " } })"
+    var animGlobal = enabled
+      ? ("; hl.animation({ leaf = \"global\", enabled = true, speed = " + speed + ", bezier = \"default\" })")
+      : ""
+    return "hl.config({ general = { gaps_in = " + gaps
+      + ", gaps_out = " + gout
+      + ", border_size = " + border
+      + " }, decoration = { rounding = " + rounding
+      + ", shadow = { enabled = " + (shadow ? "true" : "false")
+      + " } } }); " + animConfig + animGlobal
+  }
+
+  function flushLook() {
+    var gaps = root.pendingGaps >= 0 ? root.pendingGaps : root.displayedGaps
+    var border = root.pendingBorder >= 0 ? root.pendingBorder : root.displayedBorder
+    var rounding = root.pendingRounding >= 0 ? root.pendingRounding : root.displayedRounding
+    var transitions = root.pendingTransitions >= 0 ? root.pendingTransitions : root.displayedTransitions
+    var shadow = root.displayedShadow
+    Util.execArgv(["hyprctl", "eval", root.lookLua(gaps, border, rounding, shadow, transitions)])
   }
 
   function flushOpacity() {
@@ -584,6 +844,15 @@ Item {
     var size = enabled ? next : 1
     var passes = root.blurPasses(next)
     root.persistBlur(enabled, size, passes)
+  }
+
+  function persistLookPending() {
+    var gaps = root.pendingGaps >= 0 ? root.pendingGaps : root.displayedGaps
+    var border = root.pendingBorder >= 0 ? root.pendingBorder : root.displayedBorder
+    var rounding = root.pendingRounding >= 0 ? root.pendingRounding : root.displayedRounding
+    var transitions = root.pendingTransitions >= 0 ? root.pendingTransitions : root.displayedTransitions
+    var shadow = root.displayedShadow
+    root.persistLook(gaps, border, rounding, shadow, transitions)
   }
 
   function persistOpacityPending() {
@@ -689,10 +958,99 @@ Item {
     ])
   }
 
+  function persistLook(gaps, border, rounding, shadow, transitions) {
+    var ms = Math.max(0, Math.round(Number(transitions) || 0))
+    var enabled = ms > 0
+    var speed = enabled ? (Math.max(1, Math.round((ms / 100) * 100) / 100)) : 1
+    Util.execArgv([
+      "python3", "-c",
+      [
+        "import pathlib, sys",
+        "gaps, border, rounding, shadow, enabled, speed = sys.argv[1:7]",
+        "gout = '0' if int(gaps) <= 0 else str(int(gaps) * 2)",
+        "def upsert(path, begin, end, block):",
+        "    path = pathlib.Path(path)",
+        "    text = path.read_text() if path.exists() else ''",
+        "    start = text.find(begin)",
+        "    if not block.endswith('\\n'):",
+        "        block += '\\n'",
+        "    if start >= 0:",
+        "        stop = text.find(end, start)",
+        "        if stop >= 0:",
+        "            stop += len(end)",
+        "            if stop < len(text) and text[stop] == '\\n':",
+        "                stop += 1",
+        "            nxt = text[:start] + block + text[stop:]",
+        "        else:",
+        "            nxt = text.rstrip() + '\\n\\n' + block",
+        "    else:",
+        "        nxt = text",
+        "        if nxt and not nxt.endswith('\\n'):",
+        "            nxt += '\\n'",
+        "        nxt += ('\\n' if nxt else '') + block",
+        "    if nxt == text:",
+        "        return False",
+        "    path.parent.mkdir(parents=True, exist_ok=True)",
+        "    path.write_text(nxt)",
+        "    return True",
+        "if enabled == 'true':",
+        "    anim = (",
+        "        'hl.config({\\n'",
+        "        '  animations = {\\n'",
+        "        '    enabled = true,\\n'",
+        "        '  },\\n'",
+        "        '})\\n'",
+        "        + f'hl.animation({{ leaf = \"global\", enabled = true, speed = {speed}, bezier = \"default\" }})\\n'",
+        "    )",
+        "else:",
+        "    anim = (",
+        "        'hl.config({\\n'",
+        "        '  animations = {\\n'",
+        "        '    enabled = false,\\n'",
+        "        '  },\\n'",
+        "        '})\\n'",
+        "    )",
+        "hypr = (",
+        "    '-- BEGIN COMTROL-LOOK\\n'",
+        "    'hl.config({\\n'",
+        "    '  general = {\\n'",
+        "    f'    gaps_in = {gaps},\\n'",
+        "    f'    gaps_out = {gout},\\n'",
+        "    f'    border_size = {border},\\n'",
+        "    '  },\\n'",
+        "    '  decoration = {\\n'",
+        "    f'    rounding = {rounding},\\n'",
+        "    '    shadow = {\\n'",
+        "    f'      enabled = {shadow},\\n'",
+        "    '    },\\n'",
+        "    '  },\\n'",
+        "    '})\\n'",
+        "    + anim",
+        "    + '-- END COMTROL-LOOK\\n'",
+        ")",
+        "upsert(pathlib.Path.home() / '.config/hypr/looknfeel.lua', '-- BEGIN COMTROL-LOOK', '-- END COMTROL-LOOK', hypr)"
+      ].join("\n"),
+      String(gaps),
+      String(border),
+      String(rounding),
+      shadow ? "true" : "false",
+      enabled ? "true" : "false",
+      String(speed)
+    ])
+  }
+
   function sliderRoleFor(itemId) {
     var id = String(itemId || "")
     if (id === root.blurItemId)
       return "blur"
+    if (id === root.gapsItemId)
+      return "gaps"
+    if (id === root.borderItemId)
+      return "border"
+    if (id === root.roundingItemId)
+      return "rounding"
+    if (id === root.transitionsItemId)
+      return "transitions"
     if (id.slice(-7) === ".active")
       return "active"
     if (id.slice(-9) === ".inactive")
@@ -722,6 +1080,41 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applyBlurStatus(text)
+    }
+  }
+
+  Process {
+    id: lookReadProc
+    command: ["bash", "-c",
+      "en=$(hyprctl getoption animations:enabled -j 2>/dev/null); "
+      + "speed=$(hyprctl animations -j 2>/dev/null | python3 -c '"
+      + "import json,sys\n"
+      + "try:\n"
+      + " d=json.load(sys.stdin)\n"
+      + " items=d[0] if isinstance(d,list) and d and isinstance(d[0],list) else d\n"
+      + " for a in items:\n"
+      + "  if a.get(\"name\")==\"global\":\n"
+      + "   print(a.get(\"speed\",10)); break\n"
+      + " else: print(10)\n"
+      + "except Exception:\n"
+      + " print(10)\n"
+      + "'); "
+      + "ms=$(python3 -c '"
+      + "import json,sys\n"
+      + "en=json.loads(sys.argv[1])\n"
+      + "speed=float(sys.argv[2])\n"
+      + "print(0 if en.get(\"bool\") is False else int(round(speed*100))\n"
+      + "' \"$en\" \"$speed\"); "
+      + "printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "
+      + "\"$(hyprctl getoption general:gaps_in -j 2>/dev/null)\" "
+      + "\"$(hyprctl getoption general:border_size -j 2>/dev/null)\" "
+      + "\"$(hyprctl getoption decoration:rounding -j 2>/dev/null)\" "
+      + "\"$(hyprctl getoption decoration:shadow:enabled -j 2>/dev/null)\" "
+      + "\"{\\\"int\\\":$ms}\""
+    ]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyLookStatus(text)
     }
   }
 
@@ -771,6 +1164,20 @@ Item {
   }
 
   Timer {
+    id: liveLookTimer
+    interval: 40
+    repeat: false
+    onTriggered: root.flushLook()
+  }
+
+  Timer {
+    id: lookPersistTimer
+    interval: 450
+    repeat: false
+    onTriggered: root.persistLookPending()
+  }
+
+  Timer {
     id: liveOpacityTimer
     interval: 40
     repeat: false
@@ -795,12 +1202,43 @@ Item {
 
       readonly property color ink: sliderRow.hasCursor ? root.selectedText : root.foreground
       readonly property bool isBlur: sliderRow.role === "blur"
+      readonly property bool isGaps: sliderRow.role === "gaps"
+      readonly property bool isBorder: sliderRow.role === "border"
+      readonly property bool isRounding: sliderRow.role === "rounding"
+      readonly property bool isTransitions: sliderRow.role === "transitions"
+      readonly property bool isLook: sliderRow.isGaps || sliderRow.isBorder || sliderRow.isRounding || sliderRow.isTransitions
       readonly property bool isActive: sliderRow.role === "active"
-      readonly property int minValue: sliderRow.isBlur ? root.minBlur : root.minOpacity
-      readonly property int maxValue: sliderRow.isBlur ? root.maxBlur : root.maxOpacity
+      readonly property int minValue: {
+        if (sliderRow.isBlur)
+          return root.minBlur
+        if (sliderRow.isGaps)
+          return root.minGaps
+        if (sliderRow.isBorder)
+          return root.minBorder
+        if (sliderRow.isRounding)
+          return root.minRounding
+        if (sliderRow.isTransitions)
+          return root.minTransitions
+        return root.minOpacity
+      }
+      readonly property int maxValue: {
+        if (sliderRow.isBlur)
+          return root.maxBlur
+        if (sliderRow.isGaps)
+          return root.maxGaps
+        if (sliderRow.isBorder)
+          return root.maxBorder
+        if (sliderRow.isRounding)
+          return root.maxRounding
+        if (sliderRow.isTransitions)
+          return root.maxTransitions
+        return root.maxOpacity
+      }
       readonly property int currentValue: {
         if (sliderRow.isBlur)
           return root.displayedBlur
+        if (sliderRow.isLook)
+          return root.displayedLook(sliderRow.role)
         return root.displayedOpacity(sliderRow.groupId, sliderRow.isActive ? "active" : "inactive")
       }
 
@@ -820,6 +1258,14 @@ Item {
             text: {
               if (sliderRow.isBlur)
                 return "BLUR"
+              if (sliderRow.isGaps)
+                return "GAPS"
+              if (sliderRow.isBorder)
+                return "BORDER"
+              if (sliderRow.isRounding)
+                return "ROUNDING"
+              if (sliderRow.isTransitions)
+                return "TRANSITIONS"
               if (sliderRow.isActive)
                 return "ACTIVE"
               return "INACTIVE"
@@ -840,6 +1286,10 @@ Item {
               var v = panelSlider.dragging ? Math.round(panelSlider.liveValue) : sliderRow.currentValue
               if (sliderRow.isBlur)
                 return v <= 0 ? "Off" : String(v)
+              if (sliderRow.isTransitions)
+                return v <= 0 ? "Off" : (String(v) + " ms")
+              if (sliderRow.isLook)
+                return String(v)
               return String(v) + "%"
             }
             color: sliderRow.ink
@@ -857,9 +1307,11 @@ Item {
           width: parent.width
           minimum: sliderRow.minValue
           maximum: sliderRow.maxValue
-          step: 1
+          step: sliderRow.isTransitions ? 50 : 1
           integer: true
-          tickCount: sliderRow.maxValue - sliderRow.minValue + 1
+          tickCount: sliderRow.isTransitions
+            ? Math.floor((sliderRow.maxValue - sliderRow.minValue) / 50) + 1
+            : (sliderRow.maxValue - sliderRow.minValue + 1)
           value: sliderRow.currentValue
           fillColor: sliderRow.ink
           knobColor: sliderRow.ink
@@ -869,6 +1321,8 @@ Item {
             var n = Math.round(v)
             if (sliderRow.isBlur)
               root.setBlur(n, false)
+            else if (sliderRow.isLook)
+              root.setLookRole(sliderRow.role, n, false)
             else
               root.setGroupOpacity(sliderRow.groupId, sliderRow.isActive ? "active" : "inactive", n, false)
           }
@@ -876,6 +1330,8 @@ Item {
             var n = Math.round(v)
             if (sliderRow.isBlur)
               root.setBlur(n, true)
+            else if (sliderRow.isLook)
+              root.setLookRole(sliderRow.role, n, true)
             else
               root.setGroupOpacity(sliderRow.groupId, sliderRow.isActive ? "active" : "inactive", n, true)
           }

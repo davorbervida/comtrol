@@ -62,7 +62,7 @@ Item {
     if (root.fontsMenuActive)
       h = rowHeight + rowSpacing + appearanceFonts.sliderRowHeight
     else if (root.desktopMenuActive)
-      h = 3 * rowHeight + appearanceDesktop.sliderRowHeight + 3 * rowSpacing
+      h = 4 * rowHeight + 5 * appearanceDesktop.sliderRowHeight + 8 * rowSpacing
     else if (root.desktopOpacityGroupActive)
       h = 2 * appearanceDesktop.sliderRowHeight + rowSpacing
     else
@@ -274,7 +274,9 @@ Item {
 
   function adjustSelectedSlider(delta) {
     var id = root.selectedItemId()
-    if (id === appearanceDesktop.blurItemId || appearanceDesktop.groupIdFromSlider(id))
+    if (id === appearanceDesktop.blurItemId
+        || appearanceDesktop.isLookSlider(id)
+        || appearanceDesktop.groupIdFromSlider(id))
       appearanceDesktop.adjustSlider(id, delta)
     else
       appearanceFonts.adjustSize(delta)
@@ -618,7 +620,8 @@ Item {
         if (root.appLibrary)
           root.appLibrary.refreshIcons()
       }
-      if (row.itemId === appearanceDesktop.itemId || row.itemId === appearanceDesktop.opacityItemId)
+      if (row.itemId === appearanceDesktop.itemId
+          || row.itemId === appearanceDesktop.opacityItemId)
         appearanceDesktop.loadDesktop()
       root.rebuildDisplay()
       return
@@ -631,6 +634,10 @@ Item {
     }
     if (row.kind === "bar-transparency") {
       appearanceDesktop.toggleTransparency()
+      return
+    }
+    if (row.kind === "look-shadow") {
+      appearanceDesktop.toggleShadow()
       return
     }
     if (row.kind === "opacity-reset") {
@@ -960,16 +967,14 @@ Item {
               anchors.leftMargin: Style.space(12)
               anchors.rightMargin: Style.space(12)
               active: row.isSlider
-              sourceComponent: (row.itemId === appearanceDesktop.blurItemId
-                  || appearanceDesktop.groupIdFromSlider(row.itemId))
+              sourceComponent: appearanceDesktop.isDesktopSlider(row.itemId)
                 ? appearanceDesktop.sliderDelegate
                 : appearanceFonts.sliderDelegate
               onLoaded: {
                 if (!item)
                   return
                 item.hasCursor = Qt.binding(function() { return row.hasCursor })
-                if (row.itemId === appearanceDesktop.blurItemId
-                    || appearanceDesktop.groupIdFromSlider(row.itemId)) {
+                if (appearanceDesktop.isDesktopSlider(row.itemId)) {
                   item.role = appearanceDesktop.sliderRoleFor(row.itemId)
                   item.groupId = appearanceDesktop.sliderGroupFor(row.itemId)
                 }
