@@ -43,28 +43,49 @@ pub fn web(query: &str) -> String {
 }
 
 fn web_items(query: &str) -> Vec<AurPackage> {
-    let query = if query.trim().is_empty() {
-        "omarchy"
+    let raw = if query.trim().is_empty() {
+        "omarchy".to_string()
     } else {
-        query.trim()
+        query.trim().to_string()
     };
 
-    let url = format!("https://aur.archlinux.org/rpc/v5/search/{query}");
-    let Ok(output) = Command::new("curl").args(["-fsSL", &url]).output() else {
-        return Vec::new();
-    };
-    if !output.status.success() {
+    let tokens: Vec<String> = raw
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase())
+        .collect();
+    if tokens.is_empty() {
         return Vec::new();
     }
 
-    let Ok(json) = serde_json::from_slice::<Value>(&output.stdout) else {
-        return Vec::new();
-    };
-    let Some(results) = json.get("results").and_then(|v| v.as_array()) else {
-        return Vec::new();
-    };
+    // "ungoogled chromium" → ungoogled-chromium (AUR names use hyphens).
+    let search_arg = tokens.join("-");
+    let mut results = aur_rpc_search(&search_arg);
+    if results.is_empty() && tokens.len() > 1 {
+        if let Some(fallback) = tokens.iter().max_by_key(|t| t.len()) {
+            if *fallback != search_arg {
+                results = aur_rpc_search(fallback);
+            }
+        }
+    }
 
-    let installed: HashSet<String> = Command::new("pacman")
+    let installed = installed_foreign();
+    let mut packages = Vec::new();
+    for pkg in results {
+        let Some(parsed) = parse_aur_hit(&pkg, &installed) else {
+            continue;
+        };
+        if tokens.iter().all(|t| package_matches(&parsed, t)) {
+            packages.push(parsed);
+        }
+    }
+
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
+    packages
+}
+
+fn installed_foreign() -> HashSet<String> {
+    Command::new("pacman")
         .args(["-Qmq"])
         .output()
         .ok()
@@ -75,52 +96,96 @@ fn web_items(query: &str) -> Vec<AurPackage> {
                 .map(str::to_string)
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let mut packages = Vec::new();
-
-    for pkg in results {
-        let name = pkg
-            .get("Name")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        if name.is_empty() {
-            continue;
-        }
-
-        packages.push(AurPackage {
-            name: name.to_string(),
-            version: pkg
-                .get("Version")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            description: pkg
-                .get("Description")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            votes: pkg
-                .get("NumVotes")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
-            popularity: pkg
-                .get("Popularity")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0),
-            maintainer: pkg
-                .get("Maintainer")
-                .and_then(|v| v.as_str())
-                .map(str::to_string),
-            url: pkg
-                .get("URL")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            installed: installed.contains(name),
-        });
+fn aur_rpc_search(arg: &str) -> Vec<Value> {
+    if arg.chars().count() < 2 {
+        return Vec::new();
     }
 
-    packages.sort_by(|a, b| a.name.cmp(&b.name));
-    packages
+    let url = format!(
+        "https://aur.archlinux.org/rpc/v5/search/{}?by=name-desc",
+        encode_path_segment(arg)
+    );
+    let Ok(output) = Command::new("curl").args(["-fsSL", &url]).output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let Ok(json) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return Vec::new();
+    };
+    json.get("results")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn parse_aur_hit(pkg: &Value, installed: &HashSet<String>) -> Option<AurPackage> {
+    let name = pkg.get("Name").and_then(|v| v.as_str()).unwrap_or_default();
+    if name.is_empty() {
+        return None;
+    }
+
+    Some(AurPackage {
+        name: name.to_string(),
+        version: pkg
+            .get("Version")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        description: pkg
+            .get("Description")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        votes: pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0),
+        popularity: pkg
+            .get("Popularity")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+        maintainer: pkg
+            .get("Maintainer")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        url: pkg
+            .get("URL")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        installed: installed.contains(name),
+    })
+}
+
+fn package_matches(pkg: &AurPackage, token: &str) -> bool {
+    let needle = normalize_pkg_text(token);
+    if needle.is_empty() {
+        return true;
+    }
+    let hay = format!(
+        "{} {}",
+        normalize_pkg_text(&pkg.name),
+        normalize_pkg_text(&pkg.description)
+    );
+    hay.contains(&needle)
+}
+
+fn normalize_pkg_text(s: &str) -> String {
+    s.to_lowercase().replace(['-', '_'], " ")
+}
+
+fn encode_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }

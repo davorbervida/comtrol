@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Shapes
+import Quickshell.Io
 import qs.Commons
 
 // Omarchy-style skewed coverflow for local theme previews (mirrors omarchy.image-picker).
@@ -30,11 +31,111 @@ Item {
   readonly property int bottomChromeHeight: filterText ? 104 : 74
 
   signal backRequested()
-  signal themeActivated(var theme)
-  signal themeRemoveRequested(var theme)
   signal filterChanged(string text)
   signal indexChanged(int index)
   signal dismissRequested()
+  signal refreshRequested()
+
+  function runScript() {
+    var url = Qt.resolvedUrl("../../run.sh").toString()
+    if (url.indexOf("file://") === 0)
+      url = url.substring(7)
+    return url
+  }
+
+  function jsonField(obj, key) {
+    if (!obj)
+      return ""
+    var value = obj[key]
+    if (value === undefined || value === null)
+      return ""
+    return String(value)
+  }
+
+  function clear() {
+    root.themes = []
+    root.filterText = ""
+    root.selectedIndex = 0
+    if (applyProc.running)
+      applyProc.running = false
+    if (removeProc.running)
+      removeProc.running = false
+  }
+
+  // Parse cOMtrol JSON array into coverflow model.
+  // Do not assign `mode` here — Menu binds it (`mode: pendingMode`). Writing
+  // that property from JS throws and aborts the load.
+  function loadFromData(items) {
+    var next = []
+    var list = items || []
+    for (var t = 0; t < list.length; t++) {
+      var theme = list[t] || {}
+      var preview = root.jsonField(theme, "preview")
+      if (!preview)
+        preview = root.jsonField(theme, "preview_image")
+      next.push({
+        name: root.jsonField(theme, "name"),
+        full_name: root.jsonField(theme, "full_name"),
+        path: root.jsonField(theme, "path"),
+        preview: preview,
+        source: root.jsonField(theme, "source"),
+        repo: root.jsonField(theme, "repo"),
+        stars: theme.stars || theme["stars"] || 0,
+        author: root.jsonField(theme, "author"),
+        description: root.jsonField(theme, "description"),
+        ansi_colors: theme.ansi_colors || theme["ansi_colors"] || [],
+        mode: root.mode
+      })
+    }
+    root.themes = next
+  }
+
+  function applyTheme(theme) {
+    if (!theme)
+      return
+    if (applyProc.running)
+      applyProc.running = false
+
+    // Local: apply installed theme. Web: install from git (also applies).
+    if (root.mode === "web" || theme.mode === "web") {
+      var repo = theme.repo || ""
+      if (!repo)
+        return
+      applyProc.command = ["omarchy-theme-install", String(repo)]
+      applyProc.running = true
+      return
+    }
+
+    if (!theme.name)
+      return
+    applyProc.command = ["omarchy-theme-set", String(theme.name)]
+    applyProc.running = true
+  }
+
+  function removeTheme(theme) {
+    if (!theme || !theme.name)
+      return
+    if (root.mode !== "local" && theme.mode !== "local")
+      return
+    if (removeProc.running)
+      removeProc.running = false
+    removeProc.command = [root.runScript(), "-r", "-theme", String(theme.name)]
+    removeProc.running = true
+  }
+
+  Process {
+    id: applyProc
+  }
+
+  Process {
+    id: removeProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function() {
+      if (root.mode === "local")
+        root.refreshRequested()
+    }
+  }
 
   readonly property var imageArray: {
     var out = []
@@ -184,7 +285,7 @@ Item {
       return
     var item = imageArray[root.selectedIndex]
     if (item)
-      root.themeActivated(item.theme || item)
+      root.applyTheme(item.theme || item)
   }
 
   function removeSelected() {
@@ -194,25 +295,29 @@ Item {
       return
     var item = imageArray[root.selectedIndex]
     if (item)
-      root.themeRemoveRequested(item.theme || item)
+      root.removeTheme(item.theme || item)
   }
 
   function revealWhenSettled() {
     Qt.callLater(function() {
-      if (root.visible && imageArray.length > 0) {
-        root.layoutSettled = true
+      // Settle even while still hidden: Menu loads data before `loading`
+      // flips, so `visible` is often false on the first callLater.
+      root.layoutSettled = true
+      if (root.visible && imageArray.length > 0)
         carousel.forceActiveFocus()
-      }
     })
   }
 
   function focusCarousel() {
-    if (root.visible && root.layoutSettled)
+    if (root.visible)
       carousel.forceActiveFocus()
   }
 
   Component.onCompleted: revealWhenSettled()
-  onVisibleChanged: if (visible) revealWhenSettled()
+  onVisibleChanged: if (visible) {
+    root.revealWhenSettled()
+    root.focusCarousel()
+  }
 
   Item {
     id: card

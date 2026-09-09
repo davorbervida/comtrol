@@ -21,9 +21,9 @@ Item {
 
   signal backRequested()
   signal dismissRequested()
-  signal installRequested(var plugin)
-  signal removeRequested(var plugin)
   signal heartSentFor(string pluginId)
+  // Do not name this installedChanged — clashes with property `installed`.
+  signal refreshInstalledRequested()
 
   readonly property string pluginId: String(plugin.id || plugin["id"] || "")
   readonly property string preview: String(plugin.preview || plugin.preview_image || "")
@@ -46,6 +46,53 @@ Item {
   readonly property bool showActionButton: installed || canInstall
   readonly property string actionIcon: installed ? "󰆴" : "󰐕"
   readonly property string actionLabel: installed ? "Remove" : "Add"
+
+  function runScript() {
+    var url = Qt.resolvedUrl("../../run.sh").toString()
+    if (url.indexOf("file://") === 0)
+      url = url.substring(7)
+    return url
+  }
+
+  function clear() {
+    root.plugin = ({})
+    root.heartBusy = false
+    root.heartSent = false
+    if (applyProc.running)
+      applyProc.running = false
+    if (removeProc.running)
+      removeProc.running = false
+  }
+
+  function applyPlugin(plugin) {
+    var target = plugin || root.plugin
+    if (!target)
+      return
+    // Catalog install_command is typically: "omarchy plugin add <git-url> --enable"
+    var cmd = String(target.install_command || "").trim()
+    if (!cmd)
+      return
+    // Quickshell Process has no TTY — omarchy-plugin-add refuses without --yes.
+    if (cmd.indexOf("--yes") < 0 && !/(^|\s)-y(\s|$)/.test(cmd))
+      cmd += " --yes"
+    if (applyProc.running)
+      applyProc.running = false
+    applyProc.command = ["bash", "-lc", cmd]
+    applyProc.running = true
+  }
+
+  function removePlugin(plugin) {
+    var target = plugin || root.plugin
+    if (!target)
+      return
+    var id = String(target.id || target["id"] || "")
+    if (!id)
+      return
+    if (removeProc.running)
+      removeProc.running = false
+    removeProc.command = [root.runScript(), "-r", "-plugin", id]
+    removeProc.running = true
+  }
 
   onPluginChanged: {
     root.heartBusy = false
@@ -97,6 +144,23 @@ Item {
   onVisibleChanged: if (visible) revealWhenSettled()
 
   Process {
+    id: applyProc
+    onExited: function(exitCode) {
+      if (exitCode === 0)
+        root.refreshInstalledRequested()
+    }
+  }
+
+  Process {
+    id: removeProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function() {
+      root.refreshInstalledRequested()
+    }
+  }
+
+  Process {
     id: heartProc
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
@@ -125,15 +189,15 @@ Item {
         event.accepted = true
       } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && root.showActionButton) {
         if (root.installed)
-          root.removeRequested(root.plugin)
+          root.removePlugin(root.plugin)
         else
-          root.installRequested(root.plugin)
+          root.applyPlugin(root.plugin)
         event.accepted = true
       } else if (event.key === Qt.Key_A && (event.modifiers & Qt.ShiftModifier) && root.canInstall && !root.installed) {
-        root.installRequested(root.plugin)
+        root.applyPlugin(root.plugin)
         event.accepted = true
       } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier) && root.installed) {
-        root.removeRequested(root.plugin)
+        root.removePlugin(root.plugin)
         event.accepted = true
       } else if (event.key === Qt.Key_H) {
         root.sendHeart()
@@ -422,9 +486,9 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     if (root.installed)
-                      root.removeRequested(root.plugin)
+                      root.removePlugin(root.plugin)
                     else
-                      root.installRequested(root.plugin)
+                      root.applyPlugin(root.plugin)
                   }
                 }
               }

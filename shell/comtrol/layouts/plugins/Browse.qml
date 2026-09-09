@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 
 // Plugin catalog grid for Plugins → Add — fixed preview size, as many columns as fit.
@@ -7,9 +8,11 @@ Item {
 
   // [{ id, name, version, author, repo, preview, description, install_command, ... }]
   property var plugins: []
+  property var installedPluginIds: ({})
   property string filterText: ""
   property int selectedIndex: 0
   property bool layoutSettled: false
+  property int installedSerial: 0
 
   property color dimColor: Color.background
   property color foreground: Color.menu.text
@@ -35,6 +38,150 @@ Item {
   signal filterChanged(string text)
   signal indexChanged(int index)
   signal dismissRequested()
+  signal installedIdsChanged()
+
+  function runScript() {
+    var url = Qt.resolvedUrl("../../run.sh").toString()
+    if (url.indexOf("file://") === 0)
+      url = url.substring(7)
+    return url
+  }
+
+  function jsonField(obj, key) {
+    if (!obj)
+      return ""
+    var value = obj[key]
+    if (value === undefined || value === null)
+      return ""
+    return String(value)
+  }
+
+  function clear() {
+    root.plugins = []
+    root.installedPluginIds = ({})
+    root.filterText = ""
+    root.selectedIndex = 0
+    if (installedProc.running)
+      installedProc.running = false
+  }
+
+  function loadFromData(data) {
+    var plugins = []
+    var list = data || []
+    var ids = root.installedPluginIds || ({})
+    for (var p = 0; p < list.length; p++) {
+      var plugin = list[p] || {}
+      var installCmd = root.jsonField(plugin, "install_command")
+      var installAvailable = !!(plugin.install_available || plugin["install_available"])
+      // Catalog entries without an install path are not shown in BrowsePlugins.
+      if (!installCmd && !installAvailable)
+        continue
+      var tags = plugin.tags || plugin["tags"] || []
+      var tagList = []
+      if (tags && tags.length !== undefined) {
+        for (var ti = 0; ti < tags.length; ti++)
+          tagList.push(String(tags[ti]))
+      }
+      var id = root.jsonField(plugin, "id")
+      plugins.push({
+        id: id,
+        name: root.jsonField(plugin, "name"),
+        version: root.jsonField(plugin, "version"),
+        author: root.jsonField(plugin, "author"),
+        repo: root.jsonField(plugin, "repo"),
+        description: root.jsonField(plugin, "description"),
+        category: root.jsonField(plugin, "category"),
+        source_type: root.jsonField(plugin, "source_type"),
+        preview: root.jsonField(plugin, "preview_image"),
+        install_command: installCmd,
+        install_available: installAvailable,
+        tags: tagList,
+        hearts: plugin.hearts || plugin["hearts"] || 0,
+        stars: plugin.stars || plugin["stars"] || 0,
+        views: plugin.views || plugin["views"] || 0,
+        copies: plugin.copies || plugin["copies"] || 0,
+        installed: !!ids[id],
+        mode: "web"
+      })
+    }
+    root.plugins = plugins
+  }
+
+  function refreshInstalled() {
+    root.installedSerial += 1
+    installedProc.serial = root.installedSerial
+    if (installedProc.running)
+      installedProc.running = false
+    installedProc.command = [root.runScript(), "-v", "-plugin"]
+    installedProc.running = true
+  }
+
+  function applyInstalledFlags() {
+    var ids = root.installedPluginIds || ({})
+    var list = root.plugins || []
+    var next = []
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i] || {}
+      var copy = ({})
+      for (var k in p)
+        copy[k] = p[k]
+      copy.installed = !!ids[String(p.id || "")]
+      next.push(copy)
+    }
+    root.plugins = next
+    root.installedIdsChanged()
+  }
+
+  function bumpHearts(pluginId) {
+    var id = String(pluginId || "")
+    if (!id)
+      return
+    var list = root.plugins || []
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].id || "") === id) {
+        list[i].hearts = Number(list[i].hearts || 0) + 1
+        break
+      }
+    }
+    root.plugins = list.slice()
+  }
+
+  function pluginWithInstalled(plugin) {
+    if (!plugin)
+      return null
+    var next = ({})
+    for (var k in plugin)
+      next[k] = plugin[k]
+    next.installed = !!root.installedPluginIds[String(plugin.id || "")]
+    return next
+  }
+
+  Process {
+    id: installedProc
+    property int serial: 0
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (installedProc.serial !== root.installedSerial)
+          return
+        var ids = ({})
+        try {
+          var data = JSON.parse(String(text || "[]"))
+          if (data && data.length !== undefined) {
+            for (var i = 0; i < data.length; i++) {
+              var id = root.jsonField(data[i] || {}, "id")
+              if (id)
+                ids[id] = true
+            }
+          }
+        } catch (e) {
+          ids = ({})
+        }
+        root.installedPluginIds = ids
+        root.applyInstalledFlags()
+      }
+    }
+  }
 
   readonly property var filteredPlugins: {
     var out = []
@@ -127,20 +274,22 @@ Item {
 
   function revealWhenSettled() {
     Qt.callLater(function() {
-      if (root.visible) {
-        root.layoutSettled = true
+      root.layoutSettled = true
+      if (root.visible)
         grid.forceActiveFocus()
-      }
     })
   }
 
   function focusGrid() {
-    if (root.visible && root.layoutSettled)
+    if (root.visible)
       grid.forceActiveFocus()
   }
 
   Component.onCompleted: revealWhenSettled()
-  onVisibleChanged: if (visible) revealWhenSettled()
+  onVisibleChanged: if (visible) {
+    root.revealWhenSettled()
+    root.focusGrid()
+  }
 
   Item {
     id: frame

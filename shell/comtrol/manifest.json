@@ -9,6 +9,6 @@
   "kinds": ["menu"],
   "keepLoaded": true,
   "entryPoints": {
-    "menu": "Menu.qml"
+    "menu": "Main.qml"
   }
 }
