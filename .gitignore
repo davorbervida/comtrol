@@ -1,6 +1,10 @@
 /target
 .tmp-xhr/
 
+# Editor / agent local config
+.cursor/
+.cursorignore
+
 # Leftover empty stub — real UI lives in layouts/ (plural)
 layout/
 
