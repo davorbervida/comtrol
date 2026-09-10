@@ -126,7 +126,7 @@ omarchy plugin update com.github.davorbervida.comtrol
 | **←** / **→** or **Tab** / **Shift+Tab** | Previous / next item |
 | **Backspace** | Go back |
 | **Type** | Filter |
-| **Ctrl+R** | Refresh / reload (themes); **Ctrl+R** or **Shift+R** on backgrounds |
+| **Ctrl+R** | Remove selected (themes); **Ctrl+R** or **Shift+R** on backgrounds |
 
 ### Plugin browse (Install → Plugins)
 | Key | Action |
