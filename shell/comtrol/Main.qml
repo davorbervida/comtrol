@@ -33,6 +33,8 @@ Item {
   property int webAursSerial: 0
   property int localWebAppsSerial: 0
   property int searchSerial: 0
+  property int youtubeSerial: 0
+  property int redditSerial: 0
   property int pendingPackageRemoveSerial: -1
   property int pendingWebAppRemoveSerial: -1
   property int pendingPluginRemoveSerial: -1
@@ -143,6 +145,12 @@ Item {
     if (root.pendingDomain === "search")
       return root.jsonField(item, "path")
 
+    if (root.pendingDomain === "youtube")
+      return root.jsonField(item, "detail") || root.jsonField(item, "channel") || root.jsonField(item, "url")
+
+    if (root.pendingDomain === "reddit")
+      return root.jsonField(item, "detail") || root.jsonField(item, "subreddit") || root.jsonField(item, "url")
+
     if (root.pendingDomain === "webapps") {
       var url = root.jsonField(item, "url")
       var source = root.jsonField(item, "source")
@@ -246,6 +254,8 @@ Item {
       Aurs.cancel()
       WebApps.cancel()
       Files.cancel()
+      YouTube.cancel()
+      Reddit.cancel()
       Files.resetHidden()
       root.pendingPackageRemoveSerial = -1
       root.pendingWebAppRemoveSerial = -1
@@ -274,6 +284,8 @@ Item {
       root.webAursSerial += 1
       root.localWebAppsSerial += 1
       root.searchSerial += 1
+      root.youtubeSerial += 1
+      root.redditSerial += 1
       Plugins.cancel()
       Themes.cancel()
       Backgrounds.cancel()
@@ -281,6 +293,8 @@ Item {
       Aurs.cancel()
       WebApps.cancel()
       Files.cancel()
+      YouTube.cancel()
+      Reddit.cancel()
       root.loading = false
       cardMenu.clearPendingAction()
       return
@@ -421,6 +435,34 @@ Item {
       root.resultRows = []
       cardMenu.markActionLoading(domain, mode)
       root.searchSerial = Files.list(mode || "files")
+      return
+    }
+
+    if (domain === "youtube" && mode === "web") {
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.youtubeSerial = YouTube.webSerial + 1
+      YouTube.searchWeb("")
+      return
+    }
+
+    if (domain === "reddit" && mode === "web") {
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.redditSerial = Reddit.webSerial + 1
+      Reddit.searchWeb("")
       return
     }
 
@@ -681,6 +723,78 @@ Item {
     }
   }
 
+  function youtubeToResultRows(results) {
+    var rows = []
+    var list = results || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var type = root.jsonField(item, "type") || "video"
+      var title = root.jsonField(item, "title")
+      var url = root.jsonField(item, "url")
+      var thumb = root.jsonField(item, "thumbnail")
+      rows.push({
+        itemId: url || root.jsonField(item, "id") || ("youtube." + i),
+        label: title || url || "?",
+        detail: root.jsonField(item, "detail") || root.jsonField(item, "channel"),
+        icon: YouTube.iconForType(type),
+        appIcon: thumb,
+        path: url,
+        kind: "result",
+        domain: "youtube",
+        mode: "web"
+      })
+    }
+    return rows
+  }
+
+  function applyYouTubeList(results) {
+    if (root.pendingDomain !== "youtube" || root.pendingMode !== "web")
+      return
+    if (YouTube.webSerial !== root.youtubeSerial)
+      return
+    root.resultRows = root.youtubeToResultRows(results)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function redditToResultRows(results) {
+    var rows = []
+    var list = results || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var type = root.jsonField(item, "type") || "post"
+      var title = root.jsonField(item, "title")
+      var url = root.jsonField(item, "url")
+      var thumb = root.jsonField(item, "thumbnail")
+      rows.push({
+        itemId: url || root.jsonField(item, "id") || ("reddit." + i),
+        label: title || url || "?",
+        detail: root.jsonField(item, "detail") || root.jsonField(item, "subreddit"),
+        icon: Reddit.iconForType(type),
+        appIcon: thumb,
+        path: url,
+        kind: "result",
+        domain: "reddit",
+        mode: "web"
+      })
+    }
+    return rows
+  }
+
+  function applyRedditList(results) {
+    if (root.pendingDomain !== "reddit" || root.pendingMode !== "web")
+      return
+    if (Reddit.webSerial !== root.redditSerial)
+      return
+    root.resultRows = root.redditToResultRows(results)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
   function openPluginDetail(plugin) {
     if (!plugin)
       return
@@ -762,6 +876,20 @@ Item {
       root.loading = true
       root.webAursSerial = Aurs.webSerial + 1
       Aurs.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
+
+    if (root.pendingDomain === "youtube") {
+      root.loading = true
+      root.youtubeSerial = YouTube.webSerial + 1
+      YouTube.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
+
+    if (root.pendingDomain === "reddit") {
+      root.loading = true
+      root.redditSerial = Reddit.webSerial + 1
+      Reddit.searchWeb(String(cardMenu.filterText || ""))
     }
   }
 
@@ -780,7 +908,7 @@ Item {
 
   Timer {
     id: liveSearchTimer
-    interval: 250
+    interval: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit") ? 700 : 250
     repeat: false
     onTriggered: root.runLiveWebSearch()
   }
@@ -1058,6 +1186,54 @@ Item {
       target: Files
       function onListed(items, mode) {
         root.applySearchList(items, mode)
+      }
+    }
+
+    Connections {
+      target: YouTube
+      function onWebListed(results) {
+        root.applyYouTubeList(results)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "youtube" || root.pendingMode !== "web")
+          return
+        if (YouTube.webSerial !== root.youtubeSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "YouTube search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+    }
+
+    Connections {
+      target: Reddit
+      function onWebListed(results) {
+        root.applyRedditList(results)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "reddit" || root.pendingMode !== "web")
+          return
+        if (Reddit.webSerial !== root.redditSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "Reddit search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
       }
     }
   }

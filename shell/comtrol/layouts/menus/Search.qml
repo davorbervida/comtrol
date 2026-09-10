@@ -1,6 +1,6 @@
 import QtQuick
 
-// Root → Search — home-directory file/folder discovery by type.
+// Root → Search — local file discovery + web search hubs.
 QtObject {
   id: root
 
@@ -8,6 +8,8 @@ QtObject {
   readonly property string label: "Search"
   readonly property string icon: "󰍉"
   readonly property string title: "Search"
+
+  readonly property string webItemId: "search.web"
 
   readonly property var rootRow: ({
     itemId: root.itemId,
@@ -24,7 +26,16 @@ QtObject {
       { itemId: "search.images", label: "Images", icon: "󰋩", kind: "action", domain: "search", mode: "images" },
       { itemId: "search.files", label: "Files", icon: "󰈔", kind: "action", domain: "search", mode: "files" },
       { itemId: "search.documents", label: "Documents", icon: "󰧮", kind: "action", domain: "search", mode: "documents" },
-      { itemId: "search.directories", label: "Directories", icon: "󰉋", kind: "action", domain: "search", mode: "directories" }
+      { itemId: "search.directories", label: "Directories", icon: "󰉋", kind: "action", domain: "search", mode: "directories" },
+      { itemId: root.webItemId, label: "Web", icon: "󰖟", kind: "menu" }
+    ]
+  })
+
+  readonly property var webMenu: ({
+    title: "Web",
+    rows: [
+      { itemId: "search.web.youtube", label: "YouTube", icon: "󰗃", kind: "action", domain: "youtube", mode: "web" },
+      { itemId: "search.web.reddit", label: "Reddit", icon: "󰑍", kind: "action", domain: "reddit", mode: "web" }
     ]
   })
 }

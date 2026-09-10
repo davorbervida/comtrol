@@ -54,7 +54,8 @@ Item {
   property int rowSpacing: Style.spacing.xs
   property int cardWidth: Math.min(Style.space(560), parent.width - Style.gapsOut * 2)
   readonly property bool resultsHaveDetail: showingResults
-    && (pendingDomain === "packages" || pendingDomain === "aurs" || pendingDomain === "search")
+    && (pendingDomain === "packages" || pendingDomain === "aurs" || pendingDomain === "search"
+        || pendingDomain === "youtube" || pendingDomain === "reddit")
   readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
   readonly property bool applicationsMenuActive: !showingResults && activeMenu === "applications"
   readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive || applicationsMenuActive) ? detailRowHeight : rowHeight
@@ -78,7 +79,8 @@ Item {
   readonly property int cardHeight: headerHeight + contentSpacing + visibleRowsHeight + contentMargin * 2
   readonly property bool usesLiveFilterSearch: showingResults
     && pendingMode === "web"
-    && (pendingDomain === "packages" || pendingDomain === "aurs")
+    && (pendingDomain === "packages" || pendingDomain === "aurs"
+        || pendingDomain === "youtube" || pendingDomain === "reddit")
 
   signal backRequested()
   signal dismissRequested()
@@ -231,6 +233,7 @@ Item {
     tree[resetMenu.processItemId] = resetMenu.processMenu
     tree[resetMenu.hardwareItemId] = resetMenu.hardwareMenu
     tree[searchMenu.itemId] = searchMenu.menu
+    tree[searchMenu.webItemId] = searchMenu.webMenu
     tree[powerMenu.itemId] = powerMenu.menu
     tree[defaultsMenu.itemId] = defaultsMenu.menu
     tree[defaultsMenu.browserItemId] = defaultsMenu.browserMenu
@@ -486,6 +489,8 @@ Item {
   function resolveAppIcon(icon) {
     var value = String(icon || "").trim()
     if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0)
+      return value
+    if (value.indexOf("http://") === 0 || value.indexOf("https://") === 0)
       return value
     if (value.charAt(0) === "/")
       return root.fileUrl(value)
@@ -800,6 +805,20 @@ Item {
       var filePath = String(row.path || row.itemId || "")
       if (filePath && Files.open(filePath))
         root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "youtube") {
+      var ytUrl = String(row.path || row.itemId || "")
+      if (ytUrl && YouTube.open(ytUrl))
+        root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "reddit") {
+      var rdUrl = String(row.path || row.itemId || "")
+      if (rdUrl && Reddit.open(rdUrl))
+        root.dismissRequested()
     }
   }
 
@@ -1017,7 +1036,7 @@ Item {
               spacing: Style.space(12)
 
               Item {
-                width: Style.space(36)
+                width: ((root.pendingDomain === "youtube" || root.pendingDomain === "reddit") && row.showResultIconImage) ? Style.space(56) : Style.space(36)
                 height: parent.height
 
                 Text {
@@ -1034,9 +1053,9 @@ Item {
                   id: appIconImage
                   anchors.centerIn: parent
                   visible: (row.isApp || row.showResultIconImage) && status !== Image.Error
-                  width: root.menuFontIcon
-                  height: root.menuFontIcon
-                  fillMode: Image.PreserveAspectFit
+                  width: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit") ? Style.space(48) : root.menuFontIcon
+                  height: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit") ? Style.space(36) : root.menuFontIcon
+                  fillMode: Image.PreserveAspectCrop
                   sourceSize.width: Math.round(width * Screen.devicePixelRatio)
                   sourceSize.height: Math.round(height * Screen.devicePixelRatio)
                   source: (row.isApp || row.showResultIconImage) ? root.resolveAppIcon(row.appIcon) : ""

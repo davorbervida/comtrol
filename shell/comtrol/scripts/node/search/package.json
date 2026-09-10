@@ -1,0 +1,10 @@
+{
+  "name": "comtrol-search",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "cOMtrol web search helpers (YouTube via Puppeteer)",
+  "dependencies": {
+    "puppeteer": "^24.22.0"
+  }
+}
