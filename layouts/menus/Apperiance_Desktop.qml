@@ -61,7 +61,7 @@ Item {
   property int liveBlur: 0
   property bool appliedBlurEnabled: false
   property bool haveAppliedBlurEnabled: false
-  property string pendingTerminalBlurAlpha: "0.80"
+  property string pendingTerminalBlurAlpha: ""
 
   property int previewGaps: -1
   property int pendingGaps: -1
@@ -756,19 +756,52 @@ Item {
 
   // Backdrop blur is invisible on fully opaque windows. When blur is on:
   // - default/browser: punch through 100% with Omarchy-like 98/96
-  // - terminal: Hyprland opacity → 100% (client-side alpha in foot/kitty/… does the frost)
+  // - terminal: Hyprland opacity → 100% live (settings untouched); client-side
+  //   alpha in foot/kitty/… uses the Terminal opacity from Opacity settings
   // Leave media/steam/qemu/etc. opaque — those groups opt out on purpose.
+  function blurAffectsTerminal() {
+    return root.displayedBlur > 0
+  }
+
   function terminalClientAlpha() {
     for (var i = 0; i < root.opacityGroups.length; i++) {
       var g = root.opacityGroups[i]
       if (String(g.id || "") !== "terminal")
         continue
-      var pct = root.clampOpacityPercent(g.active)
-      if (pct >= 100)
-        pct = 80
-      return (pct / 100).toFixed(2)
+      return (root.clampOpacityPercent(g.active) / 100).toFixed(2)
     }
-    return "0.80"
+    return "1.00"
+  }
+
+  // Hyprland-facing groups: while blur is on, terminal must stay at 100% so
+  // client alpha alone drives frost. Saved Opacity settings stay as the user set.
+  function opacityGroupsForHyprland() {
+    if (!root.blurAffectsTerminal())
+      return root.opacityGroups
+    var out = []
+    for (var i = 0; i < root.opacityGroups.length; i++) {
+      var src = root.opacityGroups[i]
+      if (String(src.id || "") === "terminal") {
+        out.push({
+          id: src.id,
+          label: src.label,
+          icon: src.icon,
+          active: 100,
+          inactive: 100,
+          rules: src.rules
+        })
+      } else {
+        out.push(src)
+      }
+    }
+    return out
+  }
+
+  function syncTerminalClientAlphaIfBlur() {
+    if (!root.blurAffectsTerminal())
+      return
+    root.pendingTerminalBlurAlpha = root.terminalClientAlpha()
+    root.persistBlurPending()
   }
 
   function ensureBlurVisibleOpacity() {
@@ -784,13 +817,7 @@ Item {
       var id = String(src.id || "")
       var active = root.clampOpacityPercent(src.active)
       var inactive = root.clampOpacityPercent(src.inactive)
-      if (id === "terminal") {
-        if (active !== 100 || inactive !== 100) {
-          active = 100
-          inactive = 100
-          changed = true
-        }
-      } else if (clampIds[id]) {
+      if (clampIds[id]) {
         if (active >= 100) {
           active = 98
           changed = true
@@ -841,6 +868,13 @@ Item {
     Util.execArgv(["hyprctl", "eval", lua])
     if (enabled)
       root.ensureBlurVisibleOpacity()
+    // Re-apply window opacities: terminal → 100 on Hyprland while blur is on,
+    // or restore the Opacity-menu values when blur turns off.
+    root.pendingOpacityAll = true
+    root.pendingOpacityGroupId = "global"
+    root.pendingOpacityActive = root.liveGlobalActive
+    root.pendingOpacityInactive = root.liveGlobalInactive
+    root.flushOpacity()
     // Foot/kitty cannot hot-reload blur; write configs immediately so the next
     // terminal spawn picks up client alpha + foot's protocol blur.
     root.persistBlurPending()
@@ -883,15 +917,25 @@ Item {
       return
     var lua = ""
     if (root.pendingOpacityAll || gid === "global") {
-      lua = Opacity.evalAll(root.opacityGroups)
+      lua = Opacity.evalAll(root.opacityGroupsForHyprland())
     } else {
       var active = root.pendingOpacityActive >= 0 ? root.pendingOpacityActive : root.displayedOpacity(gid, "active")
       var inactive = root.pendingOpacityInactive >= 0 ? root.pendingOpacityInactive : root.displayedOpacity(gid, "inactive")
-      lua = Opacity.evalGroup(gid, root.clampOpacityPercent(active), root.clampOpacityPercent(inactive))
+      if (String(gid) === "terminal" && root.blurAffectsTerminal()) {
+        active = 100
+        inactive = 100
+      } else {
+        active = root.clampOpacityPercent(active)
+        inactive = root.clampOpacityPercent(inactive)
+      }
+      lua = Opacity.evalGroup(gid, active, inactive)
     }
     if (!lua)
       return
     Util.execArgv(["hyprctl", "eval", lua])
+    if (root.blurAffectsTerminal()
+        && (root.pendingOpacityAll || gid === "global" || String(gid) === "terminal"))
+      root.syncTerminalClientAlphaIfBlur()
   }
 
   function persistBlurPending() {
@@ -901,7 +945,9 @@ Item {
     var enabled = next > 0
     var size = enabled ? next : 1
     var passes = root.blurPasses(next)
-    var alpha = enabled ? (root.pendingTerminalBlurAlpha || root.terminalClientAlpha()) : "0.80"
+    var alpha = enabled
+      ? (root.pendingTerminalBlurAlpha || root.terminalClientAlpha())
+      : root.terminalClientAlpha()
     root.persistBlur(enabled, size, passes, alpha)
   }
 
@@ -919,7 +965,7 @@ Item {
   }
 
   function persistBlur(enabled, size, passes, alpha) {
-    var a = String(alpha || "0.80")
+    var a = String(alpha || root.terminalClientAlpha() || "1.00")
     Util.execArgv([
       "python3", "-c",
       [
@@ -986,7 +1032,8 @@ Item {
         ")",
         "upsert(pathlib.Path.home() / '.config/hypr/looknfeel.lua', '-- BEGIN COMTROL-BLUR', '-- END COMTROL-BLUR', hypr)",
         // Terminals paint opaque backgrounds; Hyprland window opacity alone
-        // does not produce backdrop blur there. Set client-side alpha instead.
+        // does not produce backdrop blur there. Set client-side alpha instead
+        // from Appearance → Opacity → Terminal (not a hardcoded value).
         "home = pathlib.Path.home()",
         "on = enabled == 'true'",
         // Foot: client alpha alone is see-through without frost. blur=yes uses
