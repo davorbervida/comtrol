@@ -35,6 +35,10 @@ Item {
   property int searchSerial: 0
   property int youtubeSerial: 0
   property int redditSerial: 0
+  property int googleSerial: 0
+  property int duckduckgoSerial: 0
+  property int xSerial: 0
+  property int wikipediaSerial: 0
   property int pendingPackageRemoveSerial: -1
   property int pendingWebAppRemoveSerial: -1
   property int pendingPluginRemoveSerial: -1
@@ -151,6 +155,18 @@ Item {
     if (root.pendingDomain === "reddit")
       return root.jsonField(item, "detail") || root.jsonField(item, "subreddit") || root.jsonField(item, "url")
 
+    if (root.pendingDomain === "google")
+      return root.jsonField(item, "detail") || root.jsonField(item, "url")
+
+    if (root.pendingDomain === "duckduckgo")
+      return root.jsonField(item, "detail") || root.jsonField(item, "url")
+
+    if (root.pendingDomain === "x")
+      return root.jsonField(item, "detail") || root.jsonField(item, "user") || root.jsonField(item, "url")
+
+    if (root.pendingDomain === "wikipedia")
+      return root.jsonField(item, "detail") || root.jsonField(item, "url")
+
     if (root.pendingDomain === "webapps") {
       var url = root.jsonField(item, "url")
       var source = root.jsonField(item, "source")
@@ -227,10 +243,12 @@ Item {
   }
 
   function close() {
+    WebBrowser.cool()
     root.opened = false
   }
 
   function dismiss() {
+    WebBrowser.cool()
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide((root.manifest && root.manifest.id) || "comtrol")
@@ -256,6 +274,10 @@ Item {
       Files.cancel()
       YouTube.cancel()
       Reddit.cancel()
+      Google.cancel()
+      DuckDuckGo.cancel()
+      X.cancel()
+      Wikipedia.cancel()
       Files.resetHidden()
       root.pendingPackageRemoveSerial = -1
       root.pendingWebAppRemoveSerial = -1
@@ -286,6 +308,10 @@ Item {
       root.searchSerial += 1
       root.youtubeSerial += 1
       root.redditSerial += 1
+      root.googleSerial += 1
+      root.duckduckgoSerial += 1
+      root.xSerial += 1
+      root.wikipediaSerial += 1
       Plugins.cancel()
       Themes.cancel()
       Backgrounds.cancel()
@@ -295,6 +321,10 @@ Item {
       Files.cancel()
       YouTube.cancel()
       Reddit.cancel()
+      Google.cancel()
+      DuckDuckGo.cancel()
+      X.cancel()
+      Wikipedia.cancel()
       root.loading = false
       cardMenu.clearPendingAction()
       return
@@ -463,6 +493,62 @@ Item {
       }
       root.redditSerial = Reddit.webSerial + 1
       Reddit.searchWeb("")
+      return
+    }
+
+    if (domain === "google" && mode === "web") {
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.googleSerial = Google.webSerial + 1
+      Google.searchWeb("")
+      return
+    }
+
+    if (domain === "duckduckgo" && mode === "web") {
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.duckduckgoSerial = DuckDuckGo.webSerial + 1
+      DuckDuckGo.searchWeb("")
+      return
+    }
+
+    if (domain === "x" && mode === "web") {
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.xSerial = X.webSerial + 1
+      X.searchWeb("")
+      return
+    }
+
+    if (domain === "wikipedia" && mode === "web") {
+      if (root.showingResults) {
+        root.loading = true
+      } else {
+        root.showingResults = false
+        root.loading = true
+        root.resultRows = []
+        cardMenu.markActionLoading(domain, mode)
+      }
+      root.wikipediaSerial = Wikipedia.webSerial + 1
+      Wikipedia.searchWeb("")
       return
     }
 
@@ -795,6 +881,150 @@ Item {
     }
   }
 
+  function googleToResultRows(results) {
+    var rows = []
+    var list = results || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var type = root.jsonField(item, "type") || "web"
+      var title = root.jsonField(item, "title")
+      var url = root.jsonField(item, "url")
+      var thumb = root.jsonField(item, "thumbnail")
+      rows.push({
+        itemId: url || root.jsonField(item, "id") || ("google." + i),
+        label: title || url || "?",
+        detail: root.jsonField(item, "detail") || url,
+        icon: Google.iconForType(type),
+        appIcon: thumb,
+        path: url,
+        kind: "result",
+        domain: "google",
+        mode: "web"
+      })
+    }
+    return rows
+  }
+
+  function applyGoogleList(results) {
+    if (root.pendingDomain !== "google" || root.pendingMode !== "web")
+      return
+    if (Google.webSerial !== root.googleSerial)
+      return
+    root.resultRows = root.googleToResultRows(results)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function duckduckgoToResultRows(results) {
+    var rows = []
+    var list = results || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var type = root.jsonField(item, "type") || "web"
+      var title = root.jsonField(item, "title")
+      var url = root.jsonField(item, "url")
+      var thumb = root.jsonField(item, "thumbnail")
+      rows.push({
+        itemId: url || root.jsonField(item, "id") || ("duckduckgo." + i),
+        label: title || url || "?",
+        detail: root.jsonField(item, "detail") || url,
+        icon: DuckDuckGo.iconForType(type),
+        appIcon: thumb,
+        path: url,
+        kind: "result",
+        domain: "duckduckgo",
+        mode: "web"
+      })
+    }
+    return rows
+  }
+
+  function applyDuckDuckGoList(results) {
+    if (root.pendingDomain !== "duckduckgo" || root.pendingMode !== "web")
+      return
+    if (DuckDuckGo.webSerial !== root.duckduckgoSerial)
+      return
+    root.resultRows = root.duckduckgoToResultRows(results)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function xToResultRows(results) {
+    var rows = []
+    var list = results || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var type = root.jsonField(item, "type") || "tweet"
+      var title = root.jsonField(item, "title")
+      var url = root.jsonField(item, "url")
+      var thumb = root.jsonField(item, "thumbnail")
+      rows.push({
+        itemId: url || root.jsonField(item, "id") || ("x." + i),
+        label: title || url || "?",
+        detail: root.jsonField(item, "detail") || root.jsonField(item, "user"),
+        icon: X.iconForType(type),
+        appIcon: thumb,
+        path: url,
+        kind: "result",
+        domain: "x",
+        mode: "web"
+      })
+    }
+    return rows
+  }
+
+  function applyXList(results) {
+    if (root.pendingDomain !== "x" || root.pendingMode !== "web")
+      return
+    if (X.webSerial !== root.xSerial)
+      return
+    root.resultRows = root.xToResultRows(results)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function wikipediaToResultRows(results) {
+    var rows = []
+    var list = results || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var type = root.jsonField(item, "type") || "article"
+      var title = root.jsonField(item, "title")
+      var url = root.jsonField(item, "url")
+      var thumb = root.jsonField(item, "thumbnail")
+      rows.push({
+        itemId: url || root.jsonField(item, "id") || ("wikipedia." + i),
+        label: title || url || "?",
+        detail: root.jsonField(item, "detail") || url,
+        icon: Wikipedia.iconForType(type),
+        appIcon: thumb,
+        path: url,
+        kind: "result",
+        domain: "wikipedia",
+        mode: "web"
+      })
+    }
+    return rows
+  }
+
+  function applyWikipediaList(results) {
+    if (root.pendingDomain !== "wikipedia" || root.pendingMode !== "web")
+      return
+    if (Wikipedia.webSerial !== root.wikipediaSerial)
+      return
+    root.resultRows = root.wikipediaToResultRows(results)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
   function openPluginDetail(plugin) {
     if (!plugin)
       return
@@ -890,6 +1120,34 @@ Item {
       root.loading = true
       root.redditSerial = Reddit.webSerial + 1
       Reddit.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
+
+    if (root.pendingDomain === "google") {
+      root.loading = true
+      root.googleSerial = Google.webSerial + 1
+      Google.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
+
+    if (root.pendingDomain === "duckduckgo") {
+      root.loading = true
+      root.duckduckgoSerial = DuckDuckGo.webSerial + 1
+      DuckDuckGo.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
+
+    if (root.pendingDomain === "x") {
+      root.loading = true
+      root.xSerial = X.webSerial + 1
+      X.searchWeb(String(cardMenu.filterText || ""))
+      return
+    }
+
+    if (root.pendingDomain === "wikipedia") {
+      root.loading = true
+      root.wikipediaSerial = Wikipedia.webSerial + 1
+      Wikipedia.searchWeb(String(cardMenu.filterText || ""))
     }
   }
 
@@ -908,7 +1166,10 @@ Item {
 
   Timer {
     id: liveSearchTimer
-    interval: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit") ? 700 : 250
+    interval: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit"
+               || root.pendingDomain === "google" || root.pendingDomain === "duckduckgo"
+               || root.pendingDomain === "x"
+               || root.pendingDomain === "wikipedia") ? 700 : 250
     repeat: false
     onTriggered: root.runLiveWebSearch()
   }
@@ -1226,6 +1487,102 @@ Item {
         root.resultRows = [{
           itemId: "result.error",
           label: String(message || "Reddit search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+    }
+
+    Connections {
+      target: Google
+      function onWebListed(results) {
+        root.applyGoogleList(results)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "google" || root.pendingMode !== "web")
+          return
+        if (Google.webSerial !== root.googleSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "Google search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+    }
+
+    Connections {
+      target: DuckDuckGo
+      function onWebListed(results) {
+        root.applyDuckDuckGoList(results)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "duckduckgo" || root.pendingMode !== "web")
+          return
+        if (DuckDuckGo.webSerial !== root.duckduckgoSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "DuckDuckGo search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+    }
+
+    Connections {
+      target: X
+      function onWebListed(results) {
+        root.applyXList(results)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "x" || root.pendingMode !== "web")
+          return
+        if (X.webSerial !== root.xSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "X search failed"),
+          detail: "",
+          icon: "󰀦",
+          kind: "result",
+          domain: "",
+          mode: ""
+        }]
+        root.finishSearch()
+        Qt.callLater(root.focusActiveLayout)
+      }
+    }
+
+    Connections {
+      target: Wikipedia
+      function onWebListed(results) {
+        root.applyWikipediaList(results)
+      }
+      function onWebFailed(message) {
+        if (root.pendingDomain !== "wikipedia" || root.pendingMode !== "web")
+          return
+        if (Wikipedia.webSerial !== root.wikipediaSerial)
+          return
+        root.resultRows = [{
+          itemId: "result.error",
+          label: String(message || "Wikipedia search failed"),
           detail: "",
           icon: "󰀦",
           kind: "result",

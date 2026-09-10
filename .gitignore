@@ -1,2 +1,12 @@
 /target
 .tmp-xhr/
+
+# Leftover empty stub — real UI lives in layouts/ (plural)
+layout/
+
+# Node search helpers (Puppeteer) — never commit; npm install on first Web use
+scripts/node/**/node_modules/
+
+# Local catalog caches (fetched at runtime)
+data/*
+!data/.gitignore

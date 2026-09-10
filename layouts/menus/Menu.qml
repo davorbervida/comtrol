@@ -55,7 +55,9 @@ Item {
   property int cardWidth: Math.min(Style.space(560), parent.width - Style.gapsOut * 2)
   readonly property bool resultsHaveDetail: showingResults
     && (pendingDomain === "packages" || pendingDomain === "aurs" || pendingDomain === "search"
-        || pendingDomain === "youtube" || pendingDomain === "reddit")
+        || pendingDomain === "youtube" || pendingDomain === "reddit"
+        || pendingDomain === "google" || pendingDomain === "duckduckgo" || pendingDomain === "x"
+        || pendingDomain === "wikipedia")
   readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
   readonly property bool applicationsMenuActive: !showingResults && activeMenu === "applications"
   readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive || applicationsMenuActive) ? detailRowHeight : rowHeight
@@ -80,7 +82,9 @@ Item {
   readonly property bool usesLiveFilterSearch: showingResults
     && pendingMode === "web"
     && (pendingDomain === "packages" || pendingDomain === "aurs"
-        || pendingDomain === "youtube" || pendingDomain === "reddit")
+        || pendingDomain === "youtube" || pendingDomain === "reddit"
+        || pendingDomain === "google" || pendingDomain === "duckduckgo" || pendingDomain === "x"
+        || pendingDomain === "wikipedia")
 
   signal backRequested()
   signal dismissRequested()
@@ -232,8 +236,22 @@ Item {
     tree[resetMenu.configItemId] = resetMenu.configMenu
     tree[resetMenu.processItemId] = resetMenu.processMenu
     tree[resetMenu.hardwareItemId] = resetMenu.hardwareMenu
-    tree[searchMenu.itemId] = searchMenu.menu
-    tree[searchMenu.webItemId] = searchMenu.webMenu
+    // Web search needs Node.js; hide the entry until we know it's available.
+    var nodeOk = WebBrowser.nodeAvailable
+    var searchRows = []
+    var rawSearchRows = (searchMenu.menu && searchMenu.menu.rows) || []
+    for (var si = 0; si < rawSearchRows.length; si++) {
+      var srow = rawSearchRows[si] || {}
+      if (String(srow.itemId || "") === searchMenu.webItemId && !nodeOk)
+        continue
+      searchRows.push(srow)
+    }
+    tree[searchMenu.itemId] = {
+      title: searchMenu.menu.title,
+      rows: searchRows
+    }
+    if (nodeOk)
+      tree[searchMenu.webItemId] = searchMenu.webMenu
     tree[powerMenu.itemId] = powerMenu.menu
     tree[defaultsMenu.itemId] = defaultsMenu.menu
     tree[defaultsMenu.browserItemId] = defaultsMenu.browserMenu
@@ -285,6 +303,7 @@ Item {
     root.cursorActive = true
     root.rebuildDisplay()
     root.focusMenu()
+    root.syncWebBrowser()
   }
 
   function prepareForResults() {
@@ -294,12 +313,14 @@ Item {
     root.pendingActionDomain = ""
     root.pendingActionMode = ""
     root.rebuildDisplay()
+    root.syncWebBrowser()
   }
 
   function markActionLoading(domain, mode) {
     root.pendingActionDomain = String(domain || "")
     root.pendingActionMode = String(mode || "")
     root.rebuildDisplay()
+    root.syncWebBrowser()
   }
 
   function clearPendingAction() {
@@ -311,6 +332,24 @@ Item {
       root.rebuildDisplay()
   }
 
+  function isWebMenuContext() {
+    if (root.activeMenu === searchMenu.webItemId)
+      return true
+    // Keep browser warm during web search loading/results even if menu id drifted.
+    if (!(root.showingResults || root.pendingActionDomain))
+      return false
+    var d = String(root.pendingDomain || root.pendingActionDomain || "")
+    return d === "youtube" || d === "reddit" || d === "google"
+      || d === "duckduckgo" || d === "x" || d === "wikipedia"
+  }
+
+  function syncWebBrowser() {
+    if (root.isWebMenuContext())
+      WebBrowser.warm()
+    else
+      WebBrowser.cool()
+  }
+
   // Pop one menu level. Returns false when already at root (caller should dismiss).
   function navigateBack() {
     if (root.navStack.length === 0)
@@ -320,6 +359,7 @@ Item {
     root.selectedIndex = 0
     root.cursorActive = true
     root.rebuildDisplay()
+    root.syncWebBrowser()
     return true
   }
 
@@ -386,6 +426,10 @@ Item {
     var title = root.currentMenu().title || "Control"
     if (root.showingResults && root.pendingDomain === "search" && Files.showHidden)
       return title + " · hidden…"
+    if (WebBrowser.installing && root.isWebMenuContext())
+      return title + " · installing…"
+    if (WebBrowser.lastError && root.isWebMenuContext())
+      return title + " · " + WebBrowser.lastError
     return title + "…"
   }
 
@@ -720,6 +764,7 @@ Item {
           || row.itemId === appearanceDesktop.opacityItemId)
         appearanceDesktop.loadDesktop()
       root.rebuildDisplay()
+      root.syncWebBrowser()
       return
     }
     if (row.kind === "slider")
@@ -819,6 +864,34 @@ Item {
       var rdUrl = String(row.path || row.itemId || "")
       if (rdUrl && Reddit.open(rdUrl))
         root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "google") {
+      var gUrl = String(row.path || row.itemId || "")
+      if (gUrl && Google.open(gUrl))
+        root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "duckduckgo") {
+      var ddgUrl = String(row.path || row.itemId || "")
+      if (ddgUrl && DuckDuckGo.open(ddgUrl))
+        root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "x") {
+      var xUrl = String(row.path || row.itemId || "")
+      if (xUrl && X.open(xUrl))
+        root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "wikipedia") {
+      var wikiUrl = String(row.path || row.itemId || "")
+      if (wikiUrl && Wikipedia.open(wikiUrl))
+        root.dismissRequested()
     }
   }
 
@@ -828,6 +901,23 @@ Item {
     target: root.appLibrary
     function onAppsChanged() {
       if (root.menuSearchActive || root.applicationsMenuActive)
+        root.rebuildDisplay()
+    }
+  }
+
+  Connections {
+    target: WebBrowser
+    function onNodeAvailableChanged() {
+      // If Web was open and Node disappeared, step back to Search.
+      if (!WebBrowser.nodeAvailable && root.activeMenu === searchMenu.webItemId) {
+        root.activeMenu = searchMenu.itemId
+        root.navStack = root.ancestorsOf(searchMenu.itemId)
+      }
+      root.rebuildDisplay()
+    }
+    function onInstallingChanged() {
+      // Refresh header (“installing…”) while deps install.
+      if (root.activeMenu === searchMenu.webItemId || root.isWebMenuContext())
         root.rebuildDisplay()
     }
   }
@@ -955,7 +1045,16 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: root.headerText()
+          text: {
+            // Explicit deps so “installing…” updates without rebuildDisplay.
+            void root.filterText
+            void root.showingResults
+            void root.pendingDomain
+            void root.activeMenu
+            void WebBrowser.installing
+            void WebBrowser.lastError
+            return root.headerText()
+          }
           color: root.foreground
           opacity: root.filterText ? 1 : 0.58
           font.family: root.fontFamily
@@ -1036,7 +1135,9 @@ Item {
               spacing: Style.space(12)
 
               Item {
-                width: ((root.pendingDomain === "youtube" || root.pendingDomain === "reddit") && row.showResultIconImage) ? Style.space(56) : Style.space(36)
+                width: ((root.pendingDomain === "youtube" || root.pendingDomain === "reddit"
+                        || root.pendingDomain === "google" || root.pendingDomain === "duckduckgo" || root.pendingDomain === "x"
+                        || root.pendingDomain === "wikipedia") && row.showResultIconImage) ? Style.space(56) : Style.space(36)
                 height: parent.height
 
                 Text {
@@ -1053,8 +1154,12 @@ Item {
                   id: appIconImage
                   anchors.centerIn: parent
                   visible: (row.isApp || row.showResultIconImage) && status !== Image.Error
-                  width: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit") ? Style.space(48) : root.menuFontIcon
-                  height: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit") ? Style.space(36) : root.menuFontIcon
+                  width: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit"
+                          || root.pendingDomain === "google" || root.pendingDomain === "duckduckgo" || root.pendingDomain === "x"
+                          || root.pendingDomain === "wikipedia") ? Style.space(48) : root.menuFontIcon
+                  height: (root.pendingDomain === "youtube" || root.pendingDomain === "reddit"
+                           || root.pendingDomain === "google" || root.pendingDomain === "duckduckgo" || root.pendingDomain === "x"
+                           || root.pendingDomain === "wikipedia") ? Style.space(36) : root.menuFontIcon
                   fillMode: Image.PreserveAspectCrop
                   sourceSize.width: Math.round(width * Screen.devicePixelRatio)
                   sourceSize.height: Math.round(height * Screen.devicePixelRatio)

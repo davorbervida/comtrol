@@ -2,11 +2,12 @@
 // Reddit search via Puppeteer — prints JSON results to stdout.
 // Usage: node reddit.mjs <query>
 
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import puppeteer from "puppeteer"
 
 const MAX_RESULTS = 50
-const args = process.argv.slice(2).filter((a) => a !== "--")
-const query = args.join(" ").trim()
+const __filename = fileURLToPath(import.meta.url)
 
 function fail(message, code = 1) {
   process.stderr.write(String(message || "reddit search failed") + "\n")
@@ -149,32 +150,20 @@ async function scrapeSearch(page, searchUrl) {
   })
 }
 
-async function main() {
-  if (!query) {
-    process.stdout.write(JSON.stringify({ query: "", results: [] }) + "\n")
-    return
-  }
+export async function search(browser, query) {
+  const qRaw = String(query || "").trim()
+  if (!qRaw)
+    return []
 
-  let browser
+  const page = await browser.newPage()
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--lang=en-US,en",
-      ],
-    })
-    const page = await browser.newPage()
     await page.setViewport({ width: 1400, height: 1100 })
     await page.setUserAgent(
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     )
     await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" })
 
-    const q = encodeURIComponent(query)
+    const q = encodeURIComponent(qRaw)
     // All tab first (posts + some communities/people), then dedicated tabs to fill gaps.
     const all = await scrapeSearch(page, "https://www.reddit.com/search/?q=" + q + "&type=all")
     let communities = all.communities || []
@@ -209,10 +198,35 @@ async function main() {
     for (const p of posts)
       push(p)
 
-    process.stdout.write(JSON.stringify({
-      query,
-      results: results.slice(0, MAX_RESULTS),
-    }) + "\n")
+    return results.slice(0, MAX_RESULTS)
+  } finally {
+    await page.close().catch(() => {})
+  }
+}
+
+async function main() {
+  const args = process.argv.slice(2).filter((a) => a !== "--")
+  const query = args.join(" ").trim()
+
+  if (!query) {
+    process.stdout.write(JSON.stringify({ query: "", results: [] }) + "\n")
+    return
+  }
+
+  let browser
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--lang=en-US,en",
+      ],
+    })
+    const results = await search(browser, query)
+    process.stdout.write(JSON.stringify({ query, results }) + "\n")
   } catch (err) {
     fail(err?.stack || err?.message || String(err))
   } finally {
@@ -221,4 +235,6 @@ async function main() {
   }
 }
 
-main()
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((err) => fail(err?.stack || err?.message || String(err)))
+}

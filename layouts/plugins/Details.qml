@@ -196,10 +196,10 @@ Item {
         else
           root.applyPlugin(root.plugin)
         event.accepted = true
-      } else if (event.key === Qt.Key_A && (event.modifiers & Qt.ShiftModifier) && root.canInstall && !root.installed) {
+      } else if (event.key === Qt.Key_A && (event.modifiers & Qt.ControlModifier) && root.canInstall && !root.installed) {
         root.applyPlugin(root.plugin)
         event.accepted = true
-      } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier) && root.installed) {
+      } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier) && root.installed) {
         root.removePlugin(root.plugin)
         event.accepted = true
       } else if (event.key === Qt.Key_H) {

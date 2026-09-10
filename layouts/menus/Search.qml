@@ -35,7 +35,11 @@ QtObject {
     title: "Web",
     rows: [
       { itemId: "search.web.youtube", label: "YouTube", icon: "󰗃", kind: "action", domain: "youtube", mode: "web" },
-      { itemId: "search.web.reddit", label: "Reddit", icon: "󰑍", kind: "action", domain: "reddit", mode: "web" }
+      { itemId: "search.web.reddit", label: "Reddit", icon: "󰑍", kind: "action", domain: "reddit", mode: "web" },
+      { itemId: "search.web.google", label: "Google", icon: "󰊭", kind: "action", domain: "google", mode: "web" },
+      { itemId: "search.web.duckduckgo", label: "DuckDuckGo", icon: "󰇥", kind: "action", domain: "duckduckgo", mode: "web" },
+      { itemId: "search.web.x", label: "X", icon: "𝕏", kind: "action", domain: "x", mode: "web" },
+      { itemId: "search.web.wikipedia", label: "Wikipedia", icon: "󰖬", kind: "action", domain: "wikipedia", mode: "web" }
     ]
   })
 }

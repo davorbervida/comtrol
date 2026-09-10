@@ -2,11 +2,12 @@
 // YouTube search via Puppeteer — prints JSON results to stdout.
 // Usage: node youtube.mjs <query>
 
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import puppeteer from "puppeteer"
 
 const MAX_RESULTS = 40
-const args = process.argv.slice(2).filter((a) => a !== "--")
-const query = args.join(" ").trim()
+const __filename = fileURLToPath(import.meta.url)
 
 function fail(message, code = 1) {
   process.stderr.write(String(message || "youtube search failed") + "\n")
@@ -252,27 +253,14 @@ async function dismissConsent(page) {
   }
 }
 
-async function main() {
-  if (!query) {
-    process.stdout.write(JSON.stringify({ query: "", results: [] }) + "\n")
-    return
-  }
+export async function search(browser, query) {
+  const q = String(query || "").trim()
+  if (!q)
+    return []
 
-  const searchUrl = "https://www.youtube.com/results?search_query=" + encodeURIComponent(query)
-
-  let browser
+  const searchUrl = "https://www.youtube.com/results?search_query=" + encodeURIComponent(q)
+  const page = await browser.newPage()
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--lang=en-US,en",
-      ],
-    })
-    const page = await browser.newPage()
     await page.setViewport({ width: 1400, height: 900 })
     await page.setUserAgent(
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -343,7 +331,6 @@ async function main() {
           const id = idMatch?.[1] || ""
           const title = (el.querySelector("#video-title")?.textContent || "").trim()
           const channel = (el.querySelector("#channel-name, ytd-channel-name")?.textContent || "").trim()
-          const thumb = el.querySelector("img")?.src || ""
           const meta = Array.from(el.querySelectorAll("#metadata-line span, #metadata-line yt-formatted-string"))
             .map((n) => (n.textContent || "").trim())
             .filter(Boolean)
@@ -358,7 +345,7 @@ async function main() {
             channel,
             detail: [channel, meta].filter(Boolean).join(" · "),
             url: isShort ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}`,
-            thumbnail: safeVideoThumb(id, thumb),
+            thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
           })
         }
 
@@ -385,7 +372,6 @@ async function main() {
           const idMatch = href.match(/\/shorts\/([^/?]+)/)
           const id = idMatch?.[1] || ""
           const title = (el.querySelector("#video-title, span")?.textContent || "").trim()
-          const thumb = el.querySelector("img")?.src || ""
           if (!id)
             continue
           push({
@@ -395,7 +381,7 @@ async function main() {
             channel: "",
             detail: "Short",
             url: `https://www.youtube.com/shorts/${id}`,
-            thumbnail: safeVideoThumb(id, thumb),
+            thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
           })
         }
 
@@ -403,6 +389,34 @@ async function main() {
       })
     }
 
+    return results
+  } finally {
+    await page.close().catch(() => {})
+  }
+}
+
+async function main() {
+  const args = process.argv.slice(2).filter((a) => a !== "--")
+  const query = args.join(" ").trim()
+
+  if (!query) {
+    process.stdout.write(JSON.stringify({ query: "", results: [] }) + "\n")
+    return
+  }
+
+  let browser
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--lang=en-US,en",
+      ],
+    })
+    const results = await search(browser, query)
     process.stdout.write(JSON.stringify({ query, results }) + "\n")
   } catch (err) {
     fail(err?.stack || err?.message || String(err))
@@ -412,4 +426,6 @@ async function main() {
   }
 }
 
-main()
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((err) => fail(err?.stack || err?.message || String(err)))
+}

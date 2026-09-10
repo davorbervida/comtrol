@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "com.github.davorbervida.comtrol",
   "name": "cOMtrol",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "davor",
   "license": "MIT",
-  "description": "Omarchy control menu for themes, plugins, packages, and AUR",
+  "description": "Omarchy control menu: appearance, apps, local/web search, install, config, reset, and power",
   "kinds": ["menu"],
   "keepLoaded": true,
   "entryPoints": {

@@ -6,5 +6,10 @@ singleton Aurs 1.0 aurs.qml
 singleton WebApps 1.0 web_apps.qml
 singleton Opacity 1.0 opacity.qml
 singleton Files 1.0 files.qml
+singleton WebBrowser 1.0 web_browser.qml
 singleton YouTube 1.0 youtube.qml
 singleton Reddit 1.0 reddit.qml
+singleton Google 1.0 google.qml
+singleton DuckDuckGo 1.0 duckduckgo.qml
+singleton X 1.0 x.qml
+singleton Wikipedia 1.0 wikipedia.qml
