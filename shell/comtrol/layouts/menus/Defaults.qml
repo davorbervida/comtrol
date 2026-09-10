@@ -2,7 +2,7 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
-// Apps → Defaults — mirrors Omarchy menu setup.default (browser/terminal/editor/agent).
+// Config → Default apps — mirrors Omarchy menu setup.default (browser/terminal/editor/agent).
 Item {
   id: root
 
@@ -11,9 +11,9 @@ Item {
   visible: false
 
   readonly property string itemId: "defaults"
-  readonly property string label: "Defaults"
+  readonly property string label: "Default apps"
   readonly property string icon: ""
-  readonly property string title: "Defaults"
+  readonly property string title: "Default apps"
 
   property string currentBrowser: ""
   property string currentTerminal: ""

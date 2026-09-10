@@ -40,13 +40,19 @@ Item {
   property color selectedText: Color.menu.selectedText
   readonly property int cornerRadius: Style.cornerRadius
   property string fontFamily: Style.font.menuFamily
+  // Slightly larger type than the shared shell scale for menu readability.
+  readonly property real menuFontScale: 1.25
+  readonly property int menuFontCaption: Math.max(1, Math.round(Style.font.caption * menuFontScale))
+  readonly property int menuFontBody: Math.max(1, Math.round(Style.font.body * menuFontScale))
+  readonly property int menuFontHeading: Math.max(1, Math.round(Style.font.heading * menuFontScale))
+  readonly property int menuFontIcon: Math.max(1, Math.round(Style.font.iconLarge * menuFontScale))
   property int contentMargin: Style.spacing.panelPadding
   property int contentSpacing: Style.spacing.md
-  property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
-  property int rowHeight: Math.max(Style.space(36), Style.font.body + Style.spacing.controlPaddingY * 2)
-  property int detailRowHeight: Math.max(Style.space(52), Style.font.body + Style.font.caption + Style.spacing.controlPaddingY * 2)
+  property int headerHeight: Math.max(Style.space(40), menuFontHeading + Style.spacing.controlPaddingY * 2)
+  property int rowHeight: Math.max(Style.space(42), menuFontBody + Style.spacing.controlPaddingY * 2)
+  property int detailRowHeight: Math.max(Style.space(60), menuFontBody + menuFontCaption + Style.spacing.controlPaddingY * 2)
   property int rowSpacing: Style.spacing.xs
-  property int cardWidth: Math.min(Style.space(360), parent.width - Style.gapsOut * 2)
+  property int cardWidth: Math.min(Style.space(560), parent.width - Style.gapsOut * 2)
   readonly property bool resultsHaveDetail: showingResults
     && (pendingDomain === "packages" || pendingDomain === "aurs")
   readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
@@ -79,9 +85,30 @@ Item {
   signal actionRequested(string domain, string mode, string title)
   signal liveSearchRequested(string query)
   signal removePackageRequested(string name)
+  signal togglePluginRequested(string name)
 
   Install {
     id: installMenu
+  }
+
+  Update {
+    id: updateMenu
+    onChanged: {
+      if (updateMenu.isUpdateMenu(root.activeMenu))
+        root.rebuildDisplay()
+    }
+  }
+
+  Config {
+    id: configMenu
+    onChanged: {
+      if (configMenu.isConfigMenu(root.activeMenu))
+        root.rebuildDisplay()
+    }
+  }
+
+  Reset {
+    id: resetMenu
   }
 
   Power {
@@ -143,8 +170,9 @@ Item {
         rows: [
           { itemId: "appearance", label: "Appearance", icon: "", kind: "menu" },
           { itemId: "apps", label: "Apps", icon: "󰀻", kind: "menu" },
-          { itemId: "plugins", label: "Plugins", icon: "󰐱", kind: "action", domain: "plugins", mode: "local" },
           installMenu.rootRow,
+          configMenu.rootRow,
+          resetMenu.rootRow,
           powerMenu.rootRow
         ]
       },
@@ -171,7 +199,6 @@ Item {
         title: "Apps",
         rows: [
           { itemId: "applications", label: "Desktop", icon: "󰀻", kind: "menu" },
-          defaultsMenu.rootRow,
           { itemId: "packages", label: "Packages", icon: "󰏖", kind: "action", domain: "packages", mode: "local" },
           { itemId: "aurs", label: "AUR", icon: "󰣇", kind: "action", domain: "aurs", mode: "local" },
           { itemId: "webapps", label: "Web Apps", icon: "󰖟", kind: "action", domain: "webapps", mode: "local" }
@@ -182,7 +209,21 @@ Item {
         rows: []
       },
     }
-    tree[installMenu.itemId] = installMenu.menu
+    tree[installMenu.itemId] = {
+      title: installMenu.menu.title,
+      rows: (installMenu.menu.rows || []).concat([updateMenu.rootRow])
+    }
+    tree[updateMenu.itemId] = updateMenu.menu
+    tree[configMenu.itemId] = {
+      title: configMenu.menu.title,
+      rows: (configMenu.menu.rows || []).concat([defaultsMenu.rootRow])
+    }
+    tree[configMenu.channelItemId] = configMenu.channelMenu
+    tree[configMenu.passwordItemId] = configMenu.passwordMenu
+    tree[resetMenu.itemId] = resetMenu.menu
+    tree[resetMenu.configItemId] = resetMenu.configMenu
+    tree[resetMenu.processItemId] = resetMenu.processMenu
+    tree[resetMenu.hardwareItemId] = resetMenu.hardwareMenu
     tree[powerMenu.itemId] = powerMenu.menu
     tree[defaultsMenu.itemId] = defaultsMenu.menu
     tree[defaultsMenu.browserItemId] = defaultsMenu.browserMenu
@@ -593,7 +634,9 @@ Item {
         domain: String(row.domain || ""),
         mode: String(row.mode || ""),
         status: String(row.status || ""),
-        command: String(row.command || "")
+        command: String(row.command || ""),
+        pluginEnabled: (row.pluginEnabled === true || row.pluginEnabled === "true" || row.pluginEnabled === 1 || row.pluginEnabled === "1") ? "1" : "0",
+        pluginCanDisable: (row.pluginCanDisable === false || row.pluginCanDisable === "false" || row.pluginCanDisable === 0 || row.pluginCanDisable === "0") ? "0" : "1"
       })
     }
 
@@ -648,6 +691,10 @@ Item {
       }
       if (row.itemId === powerMenu.itemId)
         powerMenu.load()
+      if (updateMenu.isUpdateMenu(row.itemId))
+        updateMenu.load()
+      if (configMenu.isConfigMenu(row.itemId))
+        configMenu.load()
       if (defaultsMenu.isDefaultsMenu(row.itemId))
         defaultsMenu.load()
       if (row.itemId === appearanceDesktop.itemId
@@ -680,6 +727,21 @@ Item {
     }
     if (row.kind === "power") {
       if (powerMenu.run(row.command || ""))
+        root.dismissRequested()
+      return
+    }
+    if (row.kind === "update") {
+      if (updateMenu.run(row.command || ""))
+        root.dismissRequested()
+      return
+    }
+    if (row.kind === "reset") {
+      if (resetMenu.run(row.command || ""))
+        root.dismissRequested()
+      return
+    }
+    if (row.kind === "config") {
+      if (configMenu.run(row.command || ""))
         root.dismissRequested()
       return
     }
@@ -810,6 +872,18 @@ Item {
               root.removePackageRequested(row.itemId)
           }
           event.accepted = true
+        } else if (event.key === Qt.Key_S && (event.modifiers & Qt.ControlModifier)) {
+          if (root.showingResults
+              && root.pendingDomain === "plugins"
+              && root.pendingMode === "local"
+              && root.cursorActive
+              && root.selectedIndex >= 0
+              && root.selectedIndex < displayModel.count) {
+            var toggleRow = displayModel.get(root.selectedIndex)
+            if (toggleRow && toggleRow.kind === "result" && toggleRow.itemId && toggleRow.pluginCanDisable === "1")
+              root.togglePluginRequested(toggleRow.itemId)
+          }
+          event.accepted = true
         } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127 && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
           root.setFilter(root.filterText + event.text)
           event.accepted = true
@@ -840,7 +914,7 @@ Item {
           color: root.foreground
           opacity: root.filterText ? 1 : 0.58
           font.family: root.fontFamily
-          font.pixelSize: Style.font.heading
+          font.pixelSize: root.menuFontHeading
           elide: Text.ElideRight
         }
       }
@@ -872,6 +946,8 @@ Item {
             required property string mode
             required property string status
             required property string command
+            required property string pluginEnabled
+            required property string pluginCanDisable
 
             readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
             readonly property bool hasDetail: detail.length > 0
@@ -880,13 +956,25 @@ Item {
               && ((root.pendingDomain === "packages" && root.pendingMode === "local")
                   || (root.pendingDomain === "webapps" && root.pendingMode === "local")
                   || (root.pendingDomain === "plugins" && root.pendingMode === "local"))
+            readonly property bool showPluginToggle: row.kind === "result"
+              && root.pendingDomain === "plugins"
+              && root.pendingMode === "local"
+              && row.pluginCanDisable === "1"
+            readonly property bool pluginIsEnabled: row.pluginEnabled === "1"
             readonly property bool showResultIconImage: row.kind === "result" && String(row.appIcon || "").length > 0
             readonly property bool isSlider: row.kind === "slider"
             readonly property bool hasStatus: row.status.length > 0
-            readonly property int trailingWidth: showPackageRemove
-              ? Style.space(88)
-              : hasStatus ? Style.space(128)
-              : Style.space(16)
+            readonly property int toggleWidth: Style.space(84)
+            readonly property int removeWidth: Style.space(84)
+            readonly property int trailingWidth: {
+              if (showPluginToggle && showPackageRemove)
+                return row.toggleWidth + Style.space(12) + row.removeWidth
+              if (showPackageRemove)
+                return row.removeWidth
+              if (hasStatus)
+                return Style.space(128)
+              return Style.space(16)
+            }
 
             width: ListView.view.width
             height: root.rowHeightForKind(row.kind)
@@ -913,15 +1001,15 @@ Item {
                   text: row.icon
                   color: row.hasCursor ? root.selectedText : root.foreground
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.iconLarge
+                  font.pixelSize: root.menuFontIcon
                 }
 
                 Image {
                   id: appIconImage
                   anchors.centerIn: parent
                   visible: (row.isApp || row.showResultIconImage) && status !== Image.Error
-                  width: Style.font.iconLarge
-                  height: Style.font.iconLarge
+                  width: root.menuFontIcon
+                  height: root.menuFontIcon
                   fillMode: Image.PreserveAspectFit
                   sourceSize.width: Math.round(width * Screen.devicePixelRatio)
                   sourceSize.height: Math.round(height * Screen.devicePixelRatio)
@@ -937,7 +1025,7 @@ Item {
                   text: row.label ? String(row.label).charAt(0).toUpperCase() : "?"
                   color: row.hasCursor ? root.selectedText : root.foreground
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
+                  font.pixelSize: root.menuFontBody
                   font.bold: true
                 }
               }
@@ -956,7 +1044,7 @@ Item {
                   text: row.label
                   color: row.hasCursor ? root.selectedText : root.foreground
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
+                  font.pixelSize: root.menuFontBody
                   elide: Text.ElideRight
                 }
 
@@ -968,7 +1056,7 @@ Item {
                   color: row.hasCursor ? root.selectedText : root.foreground
                   opacity: 0.62
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: root.menuFontCaption
                   elide: Text.ElideMiddle
                 }
               }
@@ -980,12 +1068,12 @@ Item {
                 Text {
                   textFormat: Text.PlainText
                   anchors.fill: parent
-                  visible: !row.showPackageRemove && !row.hasStatus
+                  visible: !row.showPackageRemove && !row.showPluginToggle && !row.hasStatus
                   text: (row.kind === "menu" || row.kind === "action") ? "›" : ""
                   color: row.hasCursor ? root.selectedText : root.foreground
                   opacity: (row.kind === "menu" || row.kind === "action") ? 0.36 : 0
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
+                  font.pixelSize: root.menuFontBody
                   verticalAlignment: Text.AlignVCenter
                   horizontalAlignment: Text.AlignRight
                 }
@@ -993,14 +1081,49 @@ Item {
                 Text {
                   textFormat: Text.PlainText
                   anchors.fill: parent
-                  visible: row.showPackageRemove || row.hasStatus
-                  text: row.showPackageRemove ? "Remove" : row.status
+                  visible: !row.showPackageRemove && !row.showPluginToggle && row.hasStatus
+                  text: row.status
                   color: row.hasCursor ? root.selectedText : root.foreground
                   opacity: 0.72
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: root.menuFontCaption
                   verticalAlignment: Text.AlignVCenter
                   horizontalAlignment: Text.AlignRight
+                }
+
+                Row {
+                  anchors.fill: parent
+                  spacing: Style.space(12)
+                  layoutDirection: Qt.RightToLeft
+                  visible: row.showPackageRemove || row.showPluginToggle
+
+                  Text {
+                    textFormat: Text.PlainText
+                    visible: row.showPackageRemove
+                    width: row.removeWidth
+                    height: parent.height
+                    text: "Remove"
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    opacity: 0.72
+                    font.family: root.fontFamily
+                    font.pixelSize: root.menuFontCaption
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    visible: row.showPluginToggle
+                    width: row.toggleWidth
+                    height: parent.height
+                    text: row.pluginIsEnabled ? "Disable" : "Enable"
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    opacity: 0.72
+                    font.family: root.fontFamily
+                    font.pixelSize: root.menuFontCaption
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                  }
                 }
               }
             }
@@ -1051,9 +1174,31 @@ Item {
 
             MouseArea {
               anchors.right: parent.right
+              anchors.rightMargin: Style.space(12) + row.removeWidth + Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              width: row.toggleWidth
+              height: parent.height
+              visible: row.showPluginToggle
+              enabled: row.showPluginToggle
+              z: 2
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onContainsMouseChanged: if (containsMouse) {
+                root.cursorActive = true
+                root.selectedIndex = index
+              }
+              onClicked: {
+                root.cursorActive = true
+                root.selectedIndex = index
+                root.togglePluginRequested(row.itemId)
+              }
+            }
+
+            MouseArea {
+              anchors.right: parent.right
               anchors.rightMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
-              width: row.trailingWidth
+              width: row.removeWidth
               height: parent.height
               visible: row.showPackageRemove
               enabled: row.showPackageRemove
@@ -1080,7 +1225,7 @@ Item {
           color: root.foreground
           opacity: 0.5
           font.family: root.fontFamily
-          font.pixelSize: Style.font.body
+          font.pixelSize: root.menuFontBody
         }
       }
     }

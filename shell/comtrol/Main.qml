@@ -35,9 +35,11 @@ Item {
   property int pendingPackageRemoveSerial: -1
   property int pendingWebAppRemoveSerial: -1
   property int pendingPluginRemoveSerial: -1
+  property int pendingPluginToggleSerial: -1
   property bool refreshPackagesAfterRemove: false
   property bool refreshWebAppsAfterRemove: false
   property bool refreshPluginsAfterRemove: false
+  property bool refreshPluginsAfterToggle: false
   property bool suppressDismissClick: false
 
   readonly property bool usePreviewTheme: showingResults
@@ -242,9 +244,11 @@ Item {
       root.pendingPackageRemoveSerial = -1
       root.pendingWebAppRemoveSerial = -1
       root.pendingPluginRemoveSerial = -1
+      root.pendingPluginToggleSerial = -1
       root.refreshPackagesAfterRemove = false
       root.refreshWebAppsAfterRemove = false
       root.refreshPluginsAfterRemove = false
+      root.refreshPluginsAfterToggle = false
       root.showingResults = false
       root.loading = false
       root.resultRows = []
@@ -427,7 +431,9 @@ Item {
         icon: "󰐱",
         kind: "result",
         domain: "plugins",
-        mode: root.pendingMode || "local"
+        mode: root.pendingMode || "local",
+        pluginEnabled: item.enabled !== false && item.enabled !== "false" && item.enabled !== 0,
+        pluginCanDisable: item.canDisable !== false && item.canDisable !== "false" && item.canDisable !== 0
       })
     }
     return rows
@@ -661,6 +667,20 @@ Item {
     }
   }
 
+  function togglePlugin(name) {
+    if (!name)
+      return
+    if (root.pendingDomain !== "plugins" || root.pendingMode !== "local")
+      return
+    var id = String(name)
+    root.refreshPluginsAfterToggle = true
+    root.pendingPluginToggleSerial = Plugins.toggleEnabled(id)
+    if (root.pendingPluginToggleSerial < 0) {
+      root.refreshPluginsAfterToggle = false
+      return
+    }
+  }
+
   function runLiveWebSearch() {
     if (!cardMenu.usesLiveFilterSearch)
       return
@@ -817,6 +837,7 @@ Item {
       onActionRequested: function(domain, mode, title) { root.runComtrol(domain, mode, title) }
       onLiveSearchRequested: liveSearchTimer.restart()
       onRemovePackageRequested: function(name) { root.removePackage(name) }
+      onTogglePluginRequested: function(name) { root.togglePlugin(name) }
     }
 
     Connections {
@@ -836,6 +857,12 @@ Item {
             return
           root.runComtrol("plugins", "local", root.resultsTitle || "Plugins")
         })
+      }
+      function onSetEnabledFinished(exitCode, serial, pluginId, enabled) {
+        if (serial !== root.pendingPluginToggleSerial)
+          return
+        root.pendingPluginToggleSerial = -1
+        root.refreshPluginsAfterToggle = false
       }
     }
 

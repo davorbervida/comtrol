@@ -12,11 +12,13 @@ Item {
   // [{ path }]
   property var backgrounds: []
   property string mode: "current"
+  property string filterText: ""
   property int selectedIndex: 0
   property bool layoutSettled: false
   property int pendingRemoveSerial: -1
 
   property color dimColor: Color.background
+  property color foreground: Color.imagePicker.text
   property color selectedBorder: Color.imagePicker.selectedBorder
   property color unselectedBorder: Color.imagePicker.unselectedBorder
 
@@ -26,8 +28,12 @@ Item {
   property int sliceHeight: 432
   property int sliceSpacing: -30
   property int skewOffset: 28
+  readonly property int bottomChromeHeight: filterText
+    ? Style.space(16) + Style.font.title + Style.space(8) + Style.font.title + Style.space(8)
+    : Style.space(16) + Style.font.title + Style.space(8)
 
   signal backRequested()
+  signal filterChanged(string text)
   signal dismissRequested()
   signal indexChanged(int index)
   signal refreshRequested()
@@ -43,6 +49,7 @@ Item {
 
   function clear() {
     root.backgrounds = []
+    root.filterText = ""
     root.selectedIndex = 0
     root.pendingRemoveSerial = -1
     if (applyProc.running)
@@ -144,6 +151,44 @@ Item {
     return Util.fileUrl(p)
   }
 
+  // Path substring match (case-insensitive).
+  function itemMatches(index) {
+    if (index < 0 || index >= imageArray.length)
+      return false
+    var needle = String(root.filterText || "").trim().toLowerCase()
+    if (!needle)
+      return true
+    var path = String(imageArray[index].path || "").toLowerCase()
+    return path.indexOf(needle) !== -1
+  }
+
+  function firstMatchingIndex() {
+    for (var i = 0; i < imageArray.length; i++) {
+      if (itemMatches(i))
+        return i
+    }
+    return -1
+  }
+
+  function filteredPosition(index) {
+    if (!root.filterText)
+      return index
+    var position = 0
+    for (var i = 0; i < index; i++) {
+      if (itemMatches(i))
+        position++
+    }
+    return position
+  }
+
+  function selectedFilteredPosition() {
+    if (!root.filterText)
+      return root.selectedIndex
+    return itemMatches(root.selectedIndex)
+      ? filteredPosition(root.selectedIndex)
+      : 0
+  }
+
   function select(index) {
     if (imageArray.length === 0)
       return
@@ -151,6 +196,8 @@ Item {
       index = 0
     else if (index >= imageArray.length)
       index = imageArray.length - 1
+    if (!itemMatches(index))
+      return
     if (index === root.selectedIndex)
       return
     root.selectedIndex = index
@@ -161,10 +208,29 @@ Item {
     var count = imageArray.length
     if (count === 0)
       return
-    root.select((root.selectedIndex + direction + count) % count)
+    var index = root.selectedIndex
+    for (var i = 0; i < count; i++) {
+      index = (index + direction + count) % count
+      if (itemMatches(index)) {
+        root.select(index)
+        return
+      }
+    }
+  }
+
+  function updateFilter(text) {
+    root.filterText = text
+    root.filterChanged(text)
+    if (!itemMatches(root.selectedIndex)) {
+      var next = firstMatchingIndex()
+      if (next >= 0)
+        root.select(next)
+    }
   }
 
   function activateSelected() {
+    if (!itemMatches(root.selectedIndex))
+      return
     if (root.selectedIndex < 0 || root.selectedIndex >= imageArray.length)
       return
     var item = imageArray[root.selectedIndex]
@@ -173,6 +239,8 @@ Item {
   }
 
   function removeSelected() {
+    if (!itemMatches(root.selectedIndex))
+      return
     if (root.selectedIndex < 0 || root.selectedIndex >= imageArray.length)
       return
     var item = imageArray[root.selectedIndex]
@@ -186,6 +254,13 @@ Item {
       if (root.visible && imageArray.length > 0)
         carousel.forceActiveFocus()
     })
+  }
+
+  function currentPath() {
+    if (imageArray.length === 0 || !itemMatches(root.selectedIndex))
+      return root.filterText ? "No matches" : ""
+    var item = imageArray[root.selectedIndex]
+    return String((item && item.path) || "")
   }
 
   function focusCarousel() {
@@ -203,14 +278,17 @@ Item {
     id: card
     visible: root.layoutSettled && imageArray.length > 0
     width: Math.min(parent.width - 80, root.expandedWidth + 13 * (root.sliceWidth + root.sliceSpacing) + 40)
-    height: root.expandedHeight
+    height: root.expandedHeight + root.bottomChromeHeight
     anchors.centerIn: parent
 
     MouseArea { anchors.fill: parent; onClicked: {} }
 
     Item {
       id: carousel
-      anchors.centerIn: parent
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: root.bottomChromeHeight
+      anchors.horizontalCenter: parent.horizontalCenter
       width: root.expandedWidth + 13 * (root.sliceWidth + root.sliceSpacing)
       height: root.expandedHeight
       clip: false
@@ -230,6 +308,9 @@ Item {
         } else if (event.key === Qt.Key_R && ((event.modifiers & Qt.ControlModifier) || (event.modifiers & Qt.ShiftModifier))) {
           root.removeSelected()
           event.accepted = true
+        } else if (Util.editsFilter(event, root.filterText)) {
+          root.updateFilter(Util.editedFilter(event, root.filterText))
+          event.accepted = true
         } else if (event.key === Qt.Key_Backspace) {
           root.backRequested()
           event.accepted = true
@@ -238,6 +319,9 @@ Item {
           event.accepted = true
         } else if (event.key === Qt.Key_Right || event.key === Qt.Key_Tab) {
           root.selectAdjacent(1)
+          event.accepted = true
+        } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127 && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
+          root.updateFilter(root.filterText + event.text)
           event.accepted = true
         }
       }
@@ -253,9 +337,10 @@ Item {
 
           readonly property var imageData: root.imageArray[index]
           readonly property string thumbnailPath: imageData ? imageData.thumbnailPath : ""
-          readonly property int relativeIndex: index - root.selectedIndex
-          readonly property bool selected: index === root.selectedIndex
-          readonly property bool nearby: Math.abs(relativeIndex) <= 16
+          readonly property bool matched: root.itemMatches(index)
+          readonly property int relativeIndex: root.filteredPosition(index) - root.selectedFilteredPosition()
+          readonly property bool selected: matched && index === root.selectedIndex
+          readonly property bool nearby: matched && Math.abs(relativeIndex) <= 16
           property bool sourceActivated: nearby
           onNearbyChanged: if (nearby) sourceActivated = true
 
@@ -343,6 +428,39 @@ Item {
           }
         }
       }
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      anchors.top: carousel.bottom
+      anchors.topMargin: Style.space(16)
+      anchors.horizontalCenter: carousel.horizontalCenter
+      width: Math.min(parent.width - Style.space(40), root.expandedWidth)
+      text: root.currentPath()
+      color: root.foreground
+      style: Text.Outline
+      styleColor: Util.alpha(root.dimColor, 0.7)
+      font.pixelSize: Style.font.title
+      font.weight: Font.DemiBold
+      horizontalAlignment: Text.AlignHCenter
+      elide: Text.ElideMiddle
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      visible: root.filterText.length > 0
+      anchors.top: carousel.bottom
+      anchors.topMargin: Style.space(16) + Style.font.title + Style.space(8)
+      anchors.horizontalCenter: carousel.horizontalCenter
+      width: Math.min(parent.width - Style.space(40), root.expandedWidth)
+      text: root.filterText
+      color: root.foreground
+      opacity: 0.85
+      style: Text.Outline
+      styleColor: Util.alpha(root.dimColor, 0.7)
+      font.pixelSize: Style.font.title
+      horizontalAlignment: Text.AlignHCenter
+      elide: Text.ElideRight
     }
   }
 }

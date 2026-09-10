@@ -38,6 +38,8 @@ Item {
   property int installedSerial: 0
   property int addSerial: 0
   property int removeSerial: 0
+  property int setEnabledSerial: 0
+  property int stateSerial: 0
 
   property var cachedInstalled: []
   property var _pendingRemoteCatalog: null
@@ -45,6 +47,9 @@ Item {
   property bool _catalogFetchDone: false
   property bool _statsFetchDone: false
   property string _catalogFetchError: ""
+  property string _stateRaw: ""
+  property string _setEnabledId: ""
+  property bool _setEnabledValue: false
 
   // Directory scan state (pure QML).
   property int scanSerial: 0
@@ -70,6 +75,7 @@ Item {
   signal installedListed(var plugins)
   signal addFinished(int exitCode, int serial)
   signal removeFinished(int exitCode, int serial, var payload)
+  signal setEnabledFinished(int exitCode, int serial, string pluginId, bool enabled)
 
   function toFileUrl(path) {
     var p = String(path || "")
@@ -95,6 +101,8 @@ Item {
     root.catalogSerial += 1
     root.installedSerial += 1
     root.scanSerial += 1
+    root.stateSerial += 1
+    root.setEnabledSerial += 1
     root.removePipeSerial = -1
     root.catalogLoading = false
     root.catalogShownFromCache = false
@@ -105,12 +113,17 @@ Item {
     root._catalogFetchDone = false
     root._statsFetchDone = false
     root._catalogFetchError = ""
+    root._stateRaw = ""
     if (addProc.running)
       addProc.running = false
     if (removeProc.running)
       removeProc.running = false
     if (mkdirProc.running)
       mkdirProc.running = false
+    if (stateProc.running)
+      stateProc.running = false
+    if (setEnabledProc.running)
+      setEnabledProc.running = false
   }
 
   function loadCatalog() {
@@ -489,7 +502,9 @@ Item {
       path: String(pluginDir || ""),
       preview: previewPath,
       kinds: kindList,
-      source: source
+      source: source,
+      enabled: true,
+      canDisable: true
     })
   }
 
@@ -516,8 +531,116 @@ Item {
     if (root.scanSerial !== root.installedSerial)
       return
     root.cachedInstalled = root.scanAcc.slice()
-    root.installedListed(root.cachedInstalled)
     root.maybeContinueRemoveAfterScan()
+    root.beginStateEnrichment()
+  }
+
+  function beginStateEnrichment() {
+    root.stateSerial = root.installedSerial
+    root._stateRaw = ""
+    if (stateProc.running)
+      stateProc.running = false
+    stateProc.command = ["omarchy-plugin-list", "--json"]
+    stateProc.running = true
+  }
+
+  function mergePluginStates(raw) {
+    var states = ({})
+    try {
+      var arr = JSON.parse(String(raw || "[]"))
+      if (!arr || arr.length === undefined)
+        arr = []
+      for (var i = 0; i < arr.length; i++) {
+        var p = arr[i] || {}
+        var sid = String(p.id || "").trim()
+        if (!sid)
+          continue
+        states[sid] = {
+          enabled: !(p.enabled === false || p.enabled === "false" || p.enabled === 0),
+          canDisable: !(p.canDisable === false || p.canDisable === "false" || p.canDisable === 0)
+        }
+      }
+    } catch (e) {
+      return
+    }
+    var list = root.cachedInstalled || []
+    var next = []
+    for (var j = 0; j < list.length; j++) {
+      var item = list[j] || {}
+      var id = String(item.id || "")
+      var st = states[id]
+      next.push({
+        id: item.id,
+        name: item.name,
+        version: item.version,
+        description: item.description,
+        path: item.path,
+        preview: item.preview,
+        kinds: item.kinds,
+        source: item.source,
+        enabled: st ? st.enabled : (item.enabled !== false),
+        canDisable: st ? st.canDisable : (item.canDisable !== false)
+      })
+    }
+    root.cachedInstalled = next
+  }
+
+  function publishInstalled() {
+    root.installedListed(root.cachedInstalled || [])
+  }
+
+  function updateCachedEnabled(pluginId, enabled) {
+    var id = String(pluginId || "")
+    var list = root.cachedInstalled || []
+    var next = []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      if (String(item.id || "") === id) {
+        next.push({
+          id: item.id,
+          name: item.name,
+          version: item.version,
+          description: item.description,
+          path: item.path,
+          preview: item.preview,
+          kinds: item.kinds,
+          source: item.source,
+          enabled: !!enabled,
+          canDisable: item.canDisable !== false
+        })
+      } else {
+        next.push(item)
+      }
+    }
+    root.cachedInstalled = next
+  }
+
+  function setEnabled(pluginId, enabled) {
+    var id = String(pluginId || "").trim()
+    if (!id)
+      return -1
+    root.setEnabledSerial += 1
+    var serial = root.setEnabledSerial
+    root._setEnabledId = id
+    root._setEnabledValue = !!enabled
+    if (setEnabledProc.running)
+      setEnabledProc.running = false
+    if (enabled)
+      setEnabledProc.command = ["omarchy-plugin-enable", id]
+    else
+      setEnabledProc.command = ["omarchy-plugin-disable", id]
+    setEnabledProc.serial = serial
+    setEnabledProc.running = true
+    return serial
+  }
+
+  function toggleEnabled(pluginId) {
+    var id = String(pluginId || "").trim()
+    if (!id)
+      return -1
+    var plugin = root.findCached(id)
+    var currently = !plugin || plugin.enabled !== false
+    return root.setEnabled(id, !currently)
   }
 
   function maybeContinueRemoveAfterScan() {
@@ -757,6 +880,38 @@ Item {
     id: removeProc
     onExited: function(exitCode) {
       root.onRemoveProcExited(exitCode)
+    }
+  }
+
+  Process {
+    id: stateProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root._stateRaw = String(text || "")
+      }
+    }
+    onExited: function() {
+      if (root.stateSerial !== root.installedSerial)
+        return
+      root.mergePluginStates(root._stateRaw)
+      root._stateRaw = ""
+      root.publishInstalled()
+    }
+  }
+
+  Process {
+    id: setEnabledProc
+    property int serial: 0
+    onExited: function(exitCode) {
+      var serial = setEnabledProc.serial
+      var id = root._setEnabledId
+      var enabled = root._setEnabledValue
+      if (exitCode === 0)
+        root.updateCachedEnabled(id, enabled)
+      root.setEnabledFinished(exitCode, serial, id, enabled)
+      if (exitCode === 0)
+        root.publishInstalled()
     }
   }
 }

@@ -30,7 +30,8 @@ Item {
   property int sliceSpacing: -30
   property int skewOffset: 28
   // Same vertical budget as the name under the carousel (display + margins).
-  readonly property int topChromeHeight: mode === "local" ? 74 : Style.space(30)
+  // Local also shows source + position above the image.
+  readonly property int topChromeHeight: mode === "local" ? 104 : 74
   readonly property int bottomChromeHeight: filterText ? 104 : 74
 
   signal backRequested()
@@ -215,6 +216,26 @@ Item {
     return itemMatches(root.selectedIndex)
       ? filteredPosition(root.selectedIndex)
       : 0
+  }
+
+  function matchedCount() {
+    if (!root.filterText)
+      return imageArray.length
+    var n = 0
+    for (var i = 0; i < imageArray.length; i++) {
+      if (itemMatches(i))
+        n++
+    }
+    return n
+  }
+
+  function currentPositionLabel() {
+    var total = matchedCount()
+    if (total <= 0)
+      return ""
+    if (!itemMatches(root.selectedIndex))
+      return "0 / " + total
+    return (selectedFilteredPosition() + 1) + " / " + total
   }
 
   function currentLabel() {
@@ -469,6 +490,25 @@ Item {
           }
         }
       }
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      visible: text.length > 0
+      anchors.bottom: carousel.top
+      anchors.bottomMargin: root.mode === "local" && root.currentSourceLabel().length > 0
+        ? Style.space(16) + Style.font.display + Style.space(8)
+        : Style.space(16)
+      anchors.horizontalCenter: carousel.horizontalCenter
+      width: root.expandedWidth
+      text: root.currentPositionLabel()
+      color: root.foreground
+      style: Text.Outline
+      styleColor: Util.alpha(root.dimColor, 0.7)
+      font.pixelSize: Style.font.display
+      font.weight: Font.DemiBold
+      horizontalAlignment: Text.AlignHCenter
+      elide: Text.ElideRight
     }
 
     Text {
