@@ -3,6 +3,7 @@ import Quickshell.Io
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../../functions"
 
 // Appearance → Desktop: bar, blur, look (gaps/border/rounding/shadow), opacity.
 Item {
@@ -33,8 +34,6 @@ Item {
   readonly property string label: "Desktop"
   readonly property string icon: "󰇄"
   readonly property string title: "Desktop"
-
-  readonly property string scriptPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/comtrol/opacity_groups.py"
 
   readonly property int minBlur: 0
   readonly property int maxBlur: 20
@@ -444,35 +443,33 @@ Item {
     root.changed()
   }
 
-  function applyOpacityScan(text) {
-    try {
-      var data = JSON.parse(String(text || "{}"))
-      var groups = data.groups || []
-      var next = []
-      for (var i = 0; i < groups.length; i++) {
-        var g = groups[i] || {}
-        next.push({
-          id: String(g.id || ""),
-          label: String(g.label || g.id || ""),
-          icon: String(g.icon || "󰂵"),
-          active: root.clampOpacityPercent(g.active),
-          inactive: root.clampOpacityPercent(g.inactive),
-          rules: g.rules || []
-        })
-      }
-      root.opacityGroups = next
-      root.previewOpacity = ({})
-      root.syncGlobalFromGroups()
-      root.changed()
-    } catch (e) {
+  function applyOpacityGroups(groups) {
+    var list = groups || []
+    var next = []
+    for (var i = 0; i < list.length; i++) {
+      var g = list[i] || {}
+      next.push({
+        id: String(g.id || ""),
+        label: String(g.label || g.id || ""),
+        icon: String(g.icon || "󰂵"),
+        active: root.clampOpacityPercent(g.active),
+        inactive: root.clampOpacityPercent(g.inactive),
+        rules: g.rules || []
+      })
     }
+    root.opacityGroups = next
+    root.previewOpacity = ({})
+    root.syncGlobalFromGroups()
+    root.changed()
   }
 
   function resetOpacityDefaults() {
-    if (opacityResetProc.running)
-      return
-    opacityResetProc.command = ["python3", root.scriptPath, "reset"]
-    opacityResetProc.running = true
+    root.applyOpacityGroups(Opacity.reset())
+    root.pendingOpacityAll = true
+    root.pendingOpacityGroupId = "global"
+    root.pendingOpacityActive = root.liveGlobalActive
+    root.pendingOpacityInactive = root.liveGlobalInactive
+    root.flushOpacity()
   }
 
   function loadDesktop() {
@@ -492,10 +489,7 @@ Item {
   }
 
   function loadOpacityGroups() {
-    if (opacityScanProc.running)
-      return
-    opacityScanProc.command = ["python3", root.scriptPath, "scan"]
-    opacityScanProc.running = true
+    root.applyOpacityGroups(Opacity.scan())
   }
 
   function setPosition(name) {
@@ -808,32 +802,17 @@ Item {
     var gid = root.pendingOpacityGroupId
     if (!gid)
       return
+    var lua = ""
     if (root.pendingOpacityAll || gid === "global") {
-      var tmp = (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/comtrol-opacity-eval.json"
-      var payload = JSON.stringify({ groups: root.opacityGroups })
-      if (opacityEvalProc.running)
-        opacityEvalProc.running = false
-      opacityEvalProc.command = [
-        "bash", "-lc",
-        "printf %s " + Util.shellQuote(payload) + " > " + Util.shellQuote(tmp)
-          + " && lua=$(python3 " + Util.shellQuote(root.scriptPath) + " eval-all @" + Util.shellQuote(tmp)
-          + ") && hyprctl eval \"$lua\""
-      ]
-      opacityEvalProc.running = true
-      return
+      lua = Opacity.evalAll(root.opacityGroups)
+    } else {
+      var active = root.pendingOpacityActive >= 0 ? root.pendingOpacityActive : root.displayedOpacity(gid, "active")
+      var inactive = root.pendingOpacityInactive >= 0 ? root.pendingOpacityInactive : root.displayedOpacity(gid, "inactive")
+      lua = Opacity.evalGroup(gid, root.clampOpacityPercent(active), root.clampOpacityPercent(inactive))
     }
-    var active = root.pendingOpacityActive >= 0 ? root.pendingOpacityActive : root.displayedOpacity(gid, "active")
-    var inactive = root.pendingOpacityInactive >= 0 ? root.pendingOpacityInactive : root.displayedOpacity(gid, "inactive")
-    active = root.clampOpacityPercent(active)
-    inactive = root.clampOpacityPercent(inactive)
-    if (opacityEvalProc.running)
-      opacityEvalProc.running = false
-    opacityEvalProc.command = ["bash", "-lc",
-      "lua=$(python3 " + Util.shellQuote(root.scriptPath) + " eval-lua "
-      + Util.shellQuote(gid) + " " + String(active) + " " + String(inactive)
-      + ") && hyprctl eval \"$lua\""
-    ]
-    opacityEvalProc.running = true
+    if (!lua)
+      return
+    Util.execArgv(["hyprctl", "eval", lua])
   }
 
   function persistBlurPending() {
@@ -856,17 +835,7 @@ Item {
   }
 
   function persistOpacityPending() {
-    var payload = JSON.stringify({ groups: root.opacityGroups })
-    var tmp = Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
-    tmp = tmp + "/comtrol-opacity-groups.json"
-    if (opacitySaveProc.running)
-      opacitySaveProc.running = false
-    opacitySaveProc.command = [
-      "bash", "-lc",
-      "printf %s " + Util.shellQuote(payload) + " > " + Util.shellQuote(tmp)
-        + " && python3 " + Util.shellQuote(root.scriptPath) + " save @" + Util.shellQuote(tmp)
-    ]
-    opacitySaveProc.running = true
+    Opacity.save(root.opacityGroups)
   }
 
   function persistBlur(enabled, size, passes) {
@@ -1116,37 +1085,6 @@ Item {
       waitForEnd: true
       onStreamFinished: root.applyLookStatus(text)
     }
-  }
-
-  Process {
-    id: opacityScanProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.applyOpacityScan(text)
-    }
-  }
-
-  Process {
-    id: opacityResetProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        root.applyOpacityScan(text)
-        root.pendingOpacityAll = true
-        root.pendingOpacityGroupId = "global"
-        root.pendingOpacityActive = root.liveGlobalActive
-        root.pendingOpacityInactive = root.liveGlobalInactive
-        root.flushOpacity()
-      }
-    }
-  }
-
-  Process {
-    id: opacityEvalProc
-  }
-
-  Process {
-    id: opacitySaveProc
   }
 
   Timer {
