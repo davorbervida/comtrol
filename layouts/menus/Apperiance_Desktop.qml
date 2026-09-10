@@ -61,6 +61,7 @@ Item {
   property int liveBlur: 0
   property bool appliedBlurEnabled: false
   property bool haveAppliedBlurEnabled: false
+  property string pendingTerminalBlurAlpha: "0.80"
 
   property int previewGaps: -1
   property int pendingGaps: -1
@@ -424,6 +425,7 @@ Item {
       }
       return fallback
     }
+    var shadowBefore = root.displayedShadow
     root.liveGaps = Math.max(root.minGaps, Math.min(root.maxGaps, parseIntOpt(parts[0], root.liveGaps)))
     root.liveBorder = Math.max(root.minBorder, Math.min(root.maxBorder, parseIntOpt(parts[1], root.liveBorder)))
     root.liveRounding = Math.max(root.minRounding, Math.min(root.maxRounding, parseIntOpt(parts[2], root.liveRounding)))
@@ -440,7 +442,10 @@ Item {
     if (root.havePendingShadow && root.pendingShadow === root.liveShadow) {
       root.havePendingShadow = false
     }
-    root.changed()
+    // Only rebuild the menu when a status label changes (Shadow On/Off).
+    // Numeric look values update slider bindings without clearing the list.
+    if (root.displayedShadow !== shadowBefore)
+      root.changed()
   }
 
   function applyOpacityGroups(groups) {
@@ -517,9 +522,9 @@ Item {
     root.previewBlur = next
     root.liveBlur = next
     root.pendingBlur = next
+    // flushBlur applies hypr + terminal configs (foot cannot hot-reload).
+    liveBlurTimer.interval = persist ? 40 : 80
     liveBlurTimer.restart()
-    blurPersistTimer.interval = persist ? 80 : 450
-    blurPersistTimer.restart()
   }
 
   function adjustBlur(delta) {
@@ -541,7 +546,7 @@ Item {
     liveLookTimer.restart()
     lookPersistTimer.interval = persist ? 80 : 450
     lookPersistTimer.restart()
-    root.changed()
+    // Slider UI binds to displayed*; avoid list rebuild (hover would steal focus).
   }
 
   function setBorder(value, persist) {
@@ -552,7 +557,6 @@ Item {
     liveLookTimer.restart()
     lookPersistTimer.interval = persist ? 80 : 450
     lookPersistTimer.restart()
-    root.changed()
   }
 
   function setRounding(value, persist) {
@@ -563,7 +567,6 @@ Item {
     liveLookTimer.restart()
     lookPersistTimer.interval = persist ? 80 : 450
     lookPersistTimer.restart()
-    root.changed()
   }
 
   function setTransitions(value, persist) {
@@ -578,7 +581,6 @@ Item {
     liveLookTimer.restart()
     lookPersistTimer.interval = persist ? 80 : 450
     lookPersistTimer.restart()
-    root.changed()
   }
 
   function toggleShadow() {
@@ -682,7 +684,6 @@ Item {
     opacityPersistTimer.interval = persist ? 80 : 450
     opacityPersistTimer.restart()
     root.syncGlobalFromGroups()
-    root.changed()
   }
 
   function setGlobalOpacity(channel, value, persist) {
@@ -692,7 +693,7 @@ Item {
     for (var k in root.previewOpacity)
       preview[k] = root.previewOpacity[k]
     preview[key] = next
-    // Keep per-group previews aligned so status rows update while dragging.
+    // Parent Opacity status refreshes on navigateBack rebuild.
     for (var i = 0; i < root.opacityGroups.length; i++) {
       var gid = String(root.opacityGroups[i].id)
       preview[gid + ":" + String(channel)] = next
@@ -706,7 +707,6 @@ Item {
     liveOpacityTimer.restart()
     opacityPersistTimer.interval = persist ? 80 : 450
     opacityPersistTimer.restart()
-    root.changed()
   }
 
   function adjustSlider(itemId, delta) {
@@ -754,6 +754,74 @@ Item {
     return config + "; " + layer
   }
 
+  // Backdrop blur is invisible on fully opaque windows. When blur is on:
+  // - default/browser: punch through 100% with Omarchy-like 98/96
+  // - terminal: Hyprland opacity → 100% (client-side alpha in foot/kitty/… does the frost)
+  // Leave media/steam/qemu/etc. opaque — those groups opt out on purpose.
+  function terminalClientAlpha() {
+    for (var i = 0; i < root.opacityGroups.length; i++) {
+      var g = root.opacityGroups[i]
+      if (String(g.id || "") !== "terminal")
+        continue
+      var pct = root.clampOpacityPercent(g.active)
+      if (pct >= 100)
+        pct = 80
+      return (pct / 100).toFixed(2)
+    }
+    return "0.80"
+  }
+
+  function ensureBlurVisibleOpacity() {
+    if (!root.opacityGroups.length)
+      root.loadOpacityGroups()
+    if (!root.opacityGroups.length)
+      return false
+    var clampIds = ({ default: true, browser: true })
+    var changed = false
+    var groups = []
+    for (var i = 0; i < root.opacityGroups.length; i++) {
+      var src = root.opacityGroups[i]
+      var id = String(src.id || "")
+      var active = root.clampOpacityPercent(src.active)
+      var inactive = root.clampOpacityPercent(src.inactive)
+      if (id === "terminal") {
+        if (active !== 100 || inactive !== 100) {
+          active = 100
+          inactive = 100
+          changed = true
+        }
+      } else if (clampIds[id]) {
+        if (active >= 100) {
+          active = 98
+          changed = true
+        }
+        if (inactive >= 100) {
+          inactive = 96
+          changed = true
+        }
+      }
+      groups.push({
+        id: src.id,
+        label: src.label,
+        icon: src.icon,
+        active: active,
+        inactive: inactive,
+        rules: src.rules
+      })
+    }
+    if (!changed)
+      return false
+    root.applyOpacityGroups(groups)
+    root.pendingOpacityAll = true
+    root.pendingOpacityGroupId = "global"
+    root.pendingOpacityActive = root.liveGlobalActive
+    root.pendingOpacityInactive = root.liveGlobalInactive
+    root.flushOpacity()
+    opacityPersistTimer.interval = 80
+    opacityPersistTimer.restart()
+    return true
+  }
+
   function flushBlur() {
     var next = root.pendingBlur
     if (next < 0)
@@ -761,13 +829,24 @@ Item {
     var enabled = next > 0
     var size = enabled ? next : 1
     var passes = root.blurPasses(next)
+    var prevApplied = root.appliedBlur
+    var lua = root.blurLua(enabled, size, passes)
+    // Size-only updates can leave stale blur buffers on some surfaces; bounce
+    // enabled so every window picks up the new kernel.
+    if (enabled && prevApplied > 0 && prevApplied !== next)
+      lua = "hl.config({ decoration = { blur = { enabled = false } } }); " + lua
     root.appliedBlur = next
-    Util.execArgv(["hyprctl", "eval", root.blurLua(enabled, size, passes)])
+    if (enabled)
+      root.pendingTerminalBlurAlpha = root.terminalClientAlpha()
+    Util.execArgv(["hyprctl", "eval", lua])
+    if (enabled)
+      root.ensureBlurVisibleOpacity()
+    // Foot/kitty cannot hot-reload blur; write configs immediately so the next
+    // terminal spawn picks up client alpha + foot's protocol blur.
+    root.persistBlurPending()
     if (!root.haveAppliedBlurEnabled || enabled !== root.appliedBlurEnabled) {
       root.haveAppliedBlurEnabled = true
       root.appliedBlurEnabled = enabled
-      blurPersistTimer.interval = 1
-      blurPersistTimer.restart()
     }
   }
 
@@ -822,7 +901,8 @@ Item {
     var enabled = next > 0
     var size = enabled ? next : 1
     var passes = root.blurPasses(next)
-    root.persistBlur(enabled, size, passes)
+    var alpha = enabled ? (root.pendingTerminalBlurAlpha || root.terminalClientAlpha()) : "0.80"
+    root.persistBlur(enabled, size, passes, alpha)
   }
 
   function persistLookPending() {
@@ -838,12 +918,13 @@ Item {
     Opacity.save(root.opacityGroups)
   }
 
-  function persistBlur(enabled, size, passes) {
+  function persistBlur(enabled, size, passes, alpha) {
+    var a = String(alpha || "0.80")
     Util.execArgv([
       "python3", "-c",
       [
         "import pathlib, subprocess, sys",
-        "enabled, size, passes = sys.argv[1], sys.argv[2], sys.argv[3]",
+        "enabled, size, passes, alpha = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]",
         "def upsert(path, begin, end, block):",
         "    path = pathlib.Path(path)",
         "    text = path.read_text() if path.exists() else ''",
@@ -904,26 +985,59 @@ Item {
         "    '-- END COMTROL-BLUR'",
         ")",
         "upsert(pathlib.Path.home() / '.config/hypr/looknfeel.lua', '-- BEGIN COMTROL-BLUR', '-- END COMTROL-BLUR', hypr)",
-        "foot_block = '' if enabled != 'true' else (",
+        // Terminals paint opaque backgrounds; Hyprland window opacity alone
+        // does not produce backdrop blur there. Set client-side alpha instead.
+        "home = pathlib.Path.home()",
+        "on = enabled == 'true'",
+        // Foot: client alpha alone is see-through without frost. blur=yes uses
+        // ext-background-effect-v1 (Hyprland supports it). Foot cannot hot-reload
+        // config (SIGUSR1 only switches dark/light) — new windows pick this up.
+        "foot_block = '' if not on else (",
         "    '# BEGIN COMTROL-BLUR\\n'",
         "    '[colors-dark]\\n'",
-        "    'alpha=0.80\\n'",
-        "    'alpha-mode=default\\n'",
+        "    f'alpha={alpha}\\n'",
+        "    'alpha-mode=all\\n'",
         "    'blur=yes\\n'",
         "    '[colors-light]\\n'",
-        "    'alpha=0.80\\n'",
-        "    'alpha-mode=default\\n'",
+        "    f'alpha={alpha}\\n'",
+        "    'alpha-mode=all\\n'",
         "    'blur=yes\\n'",
         "    '# END COMTROL-BLUR'",
         ")",
-        "foot = pathlib.Path.home() / '.config/foot/foot.ini'",
-        "if foot.exists() and upsert(foot, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', foot_block):",
-        "    subprocess.run(['pkill', '-USR1', '-x', 'foot'], check=False)",
-        "    subprocess.run(['pkill', '-USR1', '-x', 'footclient'], check=False)"
+        "kitty_block = '' if not on else (",
+        "    '# BEGIN COMTROL-BLUR\\n'",
+        "    f'background_opacity {alpha}\\n'",
+        "    'background_blur 16\\n'",
+        "    '# END COMTROL-BLUR'",
+        ")",
+        "alacritty_block = '' if not on else (",
+        "    '# BEGIN COMTROL-BLUR\\n'",
+        "    '[window]\\n'",
+        "    f'opacity = {alpha}\\n'",
+        "    '# END COMTROL-BLUR'",
+        ")",
+        "ghostty_block = '' if not on else (",
+        "    '# BEGIN COMTROL-BLUR\\n'",
+        "    f'background-opacity = {alpha}\\n'",
+        "    '# END COMTROL-BLUR'",
+        ")",
+        "foot = home / '.config/foot/foot.ini'",
+        "if foot.exists():",
+        "    upsert(foot, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', foot_block)",
+        "kitty = home / '.config/kitty/kitty.conf'",
+        "if kitty.exists():",
+        "    upsert(kitty, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', kitty_block)",
+        "alacritty = home / '.config/alacritty/alacritty.toml'",
+        "if alacritty.exists():",
+        "    upsert(alacritty, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', alacritty_block)",
+        "ghostty = home / '.config/ghostty/config'",
+        "if ghostty.exists():",
+        "    upsert(ghostty, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', ghostty_block)"
       ].join("\n"),
       enabled ? "true" : "false",
       String(size),
-      String(passes)
+      String(passes),
+      a
     ])
   }
 
@@ -1092,13 +1206,6 @@ Item {
     interval: 40
     repeat: false
     onTriggered: root.flushBlur()
-  }
-
-  Timer {
-    id: blurPersistTimer
-    interval: 450
-    repeat: false
-    onTriggered: root.persistBlurPending()
   }
 
   Timer {

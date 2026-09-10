@@ -22,6 +22,11 @@ Item {
   property string filterText: ""
   property int selectedIndex: 0
   property bool cursorActive: false
+  // After keyboard navigation, ignore hover until the pointer actually moves.
+  // Prevents ListView rebuilds from stealing selection via HoverHandler recreate.
+  property bool suppressPointerSelect: false
+  property real pointerArmX: -1
+  property real pointerArmY: -1
   property var iconIndex: ({})
   property var pendingIconIndex: ({})
 
@@ -376,18 +381,19 @@ Item {
   }
 
   function isSliderSelected() {
-    if (!root.cursorActive || root.selectedIndex < 0 || root.selectedIndex >= displayModel.count)
+    if (root.selectedIndex < 0 || root.selectedIndex >= displayModel.count)
       return false
     return String(displayModel.get(root.selectedIndex).kind || "") === "slider"
   }
 
   function selectedItemId() {
-    if (!root.cursorActive || root.selectedIndex < 0 || root.selectedIndex >= displayModel.count)
+    if (root.selectedIndex < 0 || root.selectedIndex >= displayModel.count)
       return ""
     return String(displayModel.get(root.selectedIndex).itemId || "")
   }
 
   function adjustSelectedSlider(delta) {
+    root.noteKeyboardSelection()
     var id = root.selectedItemId()
     if (id === appearanceDesktop.blurItemId
         || appearanceDesktop.isLookSlider(id)
@@ -395,6 +401,42 @@ Item {
       appearanceDesktop.adjustSlider(id, delta)
     else
       appearanceFonts.adjustSize(delta)
+  }
+
+  function noteKeyboardSelection() {
+    root.suppressPointerSelect = true
+    root.pointerArmX = -1
+    root.pointerArmY = -1
+    root.cursorActive = true
+    pointerSuppressTimer.restart()
+  }
+
+  function pointerSelect(index) {
+    if (root.suppressPointerSelect)
+      return
+    root.cursorActive = true
+    root.selectedIndex = index
+  }
+
+  function considerPointerMove(x, y) {
+    if (!root.suppressPointerSelect)
+      return
+    if (root.pointerArmX < 0) {
+      root.pointerArmX = x
+      root.pointerArmY = y
+      return
+    }
+    if (Math.abs(x - root.pointerArmX) >= 2 || Math.abs(y - root.pointerArmY) >= 2) {
+      root.suppressPointerSelect = false
+      pointerSuppressTimer.stop()
+    }
+  }
+
+  Timer {
+    id: pointerSuppressTimer
+    interval: 750
+    repeat: false
+    onTriggered: root.suppressPointerSelect = false
   }
 
   function enterFontChange() {
@@ -725,8 +767,9 @@ Item {
 
   function select(delta) {
     if (displayModel.count === 0) return
-    if (!root.cursorActive) {
-      root.cursorActive = true
+    var wasActive = root.cursorActive
+    root.noteKeyboardSelection()
+    if (!wasActive) {
       root.selectedIndex = delta < 0 ? displayModel.count - 1 : 0
     } else {
       root.selectedIndex = (root.selectedIndex + delta + displayModel.count) % displayModel.count
@@ -1299,10 +1342,7 @@ Item {
 
             HoverHandler {
               enabled: row.isSlider
-              onHoveredChanged: if (hovered) {
-                root.cursorActive = true
-                root.selectedIndex = index
-              }
+              onHoveredChanged: if (hovered) root.pointerSelect(index)
             }
 
             MouseArea {
@@ -1311,11 +1351,10 @@ Item {
               enabled: !row.isSlider
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onContainsMouseChanged: if (containsMouse) {
-                root.cursorActive = true
-                root.selectedIndex = index
-              }
+              onPositionChanged: root.considerPointerMove(mouse.x, mouse.y)
+              onContainsMouseChanged: if (containsMouse) root.pointerSelect(index)
               onClicked: {
+                root.suppressPointerSelect = false
                 root.cursorActive = true
                 root.selectedIndex = index
                 root.activateIndex(index)
@@ -1333,11 +1372,10 @@ Item {
               z: 2
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onContainsMouseChanged: if (containsMouse) {
-                root.cursorActive = true
-                root.selectedIndex = index
-              }
+              onPositionChanged: root.considerPointerMove(mouse.x, mouse.y)
+              onContainsMouseChanged: if (containsMouse) root.pointerSelect(index)
               onClicked: {
+                root.suppressPointerSelect = false
                 root.cursorActive = true
                 root.selectedIndex = index
                 root.togglePluginRequested(row.itemId)
@@ -1355,11 +1393,10 @@ Item {
               z: 2
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onContainsMouseChanged: if (containsMouse) {
-                root.cursorActive = true
-                root.selectedIndex = index
-              }
+              onPositionChanged: root.considerPointerMove(mouse.x, mouse.y)
+              onContainsMouseChanged: if (containsMouse) root.pointerSelect(index)
               onClicked: {
+                root.suppressPointerSelect = false
                 root.cursorActive = true
                 root.selectedIndex = index
                 root.removePackageRequested(row.itemId)
