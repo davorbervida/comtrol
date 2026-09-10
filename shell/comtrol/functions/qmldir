@@ -5,3 +5,4 @@ singleton Packages 1.0 packages.qml
 singleton Aurs 1.0 aurs.qml
 singleton WebApps 1.0 web_apps.qml
 singleton Opacity 1.0 opacity.qml
+singleton Files 1.0 files.qml

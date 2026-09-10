@@ -7,6 +7,7 @@ Install 1.0 menus/Install.qml
 Update 1.0 menus/Update.qml
 Config 1.0 menus/Config.qml
 Reset 1.0 menus/Reset.qml
+Search 1.0 menus/Search.qml
 Power 1.0 menus/Power.qml
 Defaults 1.0 menus/Defaults.qml
 ApperianceFonts 1.0 menus/Apperiance_Fonts.qml

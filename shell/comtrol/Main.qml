@@ -32,6 +32,7 @@ Item {
   property int localAursSerial: 0
   property int webAursSerial: 0
   property int localWebAppsSerial: 0
+  property int searchSerial: 0
   property int pendingPackageRemoveSerial: -1
   property int pendingWebAppRemoveSerial: -1
   property int pendingPluginRemoveSerial: -1
@@ -139,6 +140,9 @@ Item {
     if (root.pendingDomain === "packages" || root.pendingDomain === "aurs")
       return root.jsonField(item, "description")
 
+    if (root.pendingDomain === "search")
+      return root.jsonField(item, "path")
+
     if (root.pendingDomain === "webapps") {
       var url = root.jsonField(item, "url")
       var source = root.jsonField(item, "source")
@@ -241,6 +245,8 @@ Item {
       Packages.cancel()
       Aurs.cancel()
       WebApps.cancel()
+      Files.cancel()
+      Files.resetHidden()
       root.pendingPackageRemoveSerial = -1
       root.pendingWebAppRemoveSerial = -1
       root.pendingPluginRemoveSerial = -1
@@ -267,12 +273,14 @@ Item {
       root.localAursSerial += 1
       root.webAursSerial += 1
       root.localWebAppsSerial += 1
+      root.searchSerial += 1
       Plugins.cancel()
       Themes.cancel()
       Backgrounds.cancel()
       Packages.cancel()
       Aurs.cancel()
       WebApps.cancel()
+      Files.cancel()
       root.loading = false
       cardMenu.clearPendingAction()
       return
@@ -407,8 +415,30 @@ Item {
       return
     }
 
+    if (domain === "search") {
+      root.showingResults = false
+      root.loading = true
+      root.resultRows = []
+      cardMenu.markActionLoading(domain, mode)
+      root.searchSerial = Files.list(mode || "files")
+      return
+    }
+
     console.warn("comtrol: unknown domain/mode", domain, mode)
     root.loading = false
+  }
+
+  function toggleSearchHidden() {
+    if (root.pendingDomain !== "search")
+      return
+    Files.toggleHidden()
+    root.loading = true
+    root.resultRows = []
+    if (!root.showingResults)
+      cardMenu.markActionLoading("search", root.pendingMode)
+    else
+      cardMenu.rebuildDisplay()
+    root.searchSerial = Files.list(root.pendingMode || "files")
   }
 
 
@@ -609,6 +639,42 @@ Item {
     if (WebApps.installedSerial !== root.localWebAppsSerial)
       return
     root.resultRows = root.webAppsToResultRows(apps)
+    if (root.loading) {
+      root.finishSearch()
+      Qt.callLater(root.focusActiveLayout)
+    }
+  }
+
+  function searchToResultRows(items) {
+    var rows = []
+    var list = items || []
+    var icon = Files.iconForMode(root.pendingMode)
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var name = root.jsonField(item, "name")
+      var path = root.jsonField(item, "path")
+      rows.push({
+        itemId: path || ("search." + i),
+        label: name || path || "?",
+        detail: path,
+        icon: icon,
+        path: path,
+        kind: "result",
+        domain: "search",
+        mode: root.pendingMode || "files"
+      })
+    }
+    return rows
+  }
+
+  function applySearchList(items, mode) {
+    if (root.pendingDomain !== "search")
+      return
+    if (mode && mode !== root.pendingMode)
+      return
+    if (Files.listSerial !== root.searchSerial)
+      return
+    root.resultRows = root.searchToResultRows(items)
     if (root.loading) {
       root.finishSearch()
       Qt.callLater(root.focusActiveLayout)
@@ -838,6 +904,7 @@ Item {
       onLiveSearchRequested: liveSearchTimer.restart()
       onRemovePackageRequested: function(name) { root.removePackage(name) }
       onTogglePluginRequested: function(name) { root.togglePlugin(name) }
+      onToggleSearchHiddenRequested: root.toggleSearchHidden()
     }
 
     Connections {
@@ -984,6 +1051,13 @@ Item {
             return
           root.runComtrol("webapps", "local", root.resultsTitle || "Web Apps")
         })
+      }
+    }
+
+    Connections {
+      target: Files
+      function onListed(items, mode) {
+        root.applySearchList(items, mode)
       }
     }
   }

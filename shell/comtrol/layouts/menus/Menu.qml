@@ -54,7 +54,7 @@ Item {
   property int rowSpacing: Style.spacing.xs
   property int cardWidth: Math.min(Style.space(560), parent.width - Style.gapsOut * 2)
   readonly property bool resultsHaveDetail: showingResults
-    && (pendingDomain === "packages" || pendingDomain === "aurs")
+    && (pendingDomain === "packages" || pendingDomain === "aurs" || pendingDomain === "search")
   readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
   readonly property bool applicationsMenuActive: !showingResults && activeMenu === "applications"
   readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive || applicationsMenuActive) ? detailRowHeight : rowHeight
@@ -86,6 +86,7 @@ Item {
   signal liveSearchRequested(string query)
   signal removePackageRequested(string name)
   signal togglePluginRequested(string name)
+  signal toggleSearchHiddenRequested()
 
   Install {
     id: installMenu
@@ -109,6 +110,10 @@ Item {
 
   Reset {
     id: resetMenu
+  }
+
+  Search {
+    id: searchMenu
   }
 
   Power {
@@ -170,6 +175,7 @@ Item {
         rows: [
           { itemId: "appearance", label: "Appearance", icon: "", kind: "menu" },
           { itemId: "apps", label: "Apps", icon: "󰀻", kind: "menu" },
+          searchMenu.rootRow,
           installMenu.rootRow,
           configMenu.rootRow,
           resetMenu.rootRow,
@@ -224,6 +230,7 @@ Item {
     tree[resetMenu.configItemId] = resetMenu.configMenu
     tree[resetMenu.processItemId] = resetMenu.processMenu
     tree[resetMenu.hardwareItemId] = resetMenu.hardwareMenu
+    tree[searchMenu.itemId] = searchMenu.menu
     tree[powerMenu.itemId] = powerMenu.menu
     tree[defaultsMenu.itemId] = defaultsMenu.menu
     tree[defaultsMenu.browserItemId] = defaultsMenu.browserMenu
@@ -373,7 +380,10 @@ Item {
   function headerText() {
     if (root.filterText)
       return root.filterText
-    return (root.currentMenu().title || "Control") + "…"
+    var title = root.currentMenu().title || "Control"
+    if (root.showingResults && root.pendingDomain === "search" && Files.showHidden)
+      return title + " · hidden…"
+    return title + "…"
   }
 
   function parentMenuOf(menuId) {
@@ -441,6 +451,10 @@ Item {
       return true
     var q = String(query).toLowerCase()
     var label = String(row.label || "").toLowerCase()
+    // File search: filter by basename only — full path in detail/itemId
+    // would match directory segments (e.g. "ba" → .../backup/.../favicon.ico).
+    if (String(row.domain || root.pendingDomain || "") === "search")
+      return label.indexOf(q) >= 0
     var itemId = String(row.itemId || "").toLowerCase()
     var detail = String(row.detail || "").toLowerCase()
     return label.indexOf(q) >= 0 || itemId.indexOf(q) >= 0 || detail.indexOf(q) >= 0
@@ -779,6 +793,13 @@ Item {
       }
       if (desktopPath && WebApps.launch(desktopPath))
         root.dismissRequested()
+      return
+    }
+    if (row.kind === "result"
+        && String(row.domain || root.pendingDomain || "") === "search") {
+      var filePath = String(row.path || row.itemId || "")
+      if (filePath && Files.open(filePath))
+        root.dismissRequested()
     }
   }
 
@@ -883,6 +904,11 @@ Item {
             if (toggleRow && toggleRow.kind === "result" && toggleRow.itemId && toggleRow.pluginCanDisable === "1")
               root.togglePluginRequested(toggleRow.itemId)
           }
+          event.accepted = true
+        } else if (event.key === Qt.Key_H && (event.modifiers & Qt.ControlModifier)) {
+          if (root.pendingDomain === "search"
+              && (root.showingResults || root.pendingActionDomain === "search"))
+            root.toggleSearchHiddenRequested()
           event.accepted = true
         } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127 && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
           root.setFilter(root.filterText + event.text)
