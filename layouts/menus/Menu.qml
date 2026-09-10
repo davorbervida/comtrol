@@ -803,9 +803,10 @@ Item {
         configMenu.load()
       if (defaultsMenu.isDefaultsMenu(row.itemId))
         defaultsMenu.load()
-      if (row.itemId === appearanceDesktop.itemId
-          || row.itemId === appearanceDesktop.opacityItemId)
+      if (row.itemId === appearanceDesktop.itemId)
         appearanceDesktop.loadDesktop()
+      if (row.itemId === appearanceDesktop.opacityItemId)
+        appearanceDesktop.loadOpacityGroups()
       root.rebuildDisplay()
       root.syncWebBrowser()
       return

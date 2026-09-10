@@ -3,9 +3,9 @@ import Quickshell.Io
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../../functions"
+import "../../functions/desktop"
 
-// Appearance → Desktop: bar, blur, look (gaps/border/rounding/shadow), opacity.
+// Appearance → Desktop: bar, frosting, look (gaps/border/rounding/shadow), opacity.
 Item {
   id: root
 
@@ -35,18 +35,18 @@ Item {
   readonly property string icon: "󰇄"
   readonly property string title: "Desktop"
 
-  readonly property int minBlur: 0
-  readonly property int maxBlur: 20
-  readonly property int minGaps: 0
-  readonly property int maxGaps: 20
-  readonly property int minBorder: 0
-  readonly property int maxBorder: 10
-  readonly property int minRounding: 0
-  readonly property int maxRounding: 24
+  readonly property int minBlur: Frosting.minSize
+  readonly property int maxBlur: Frosting.maxSize
+  readonly property int minGaps: Gaps.minSize
+  readonly property int maxGaps: Gaps.maxSize
+  readonly property int minBorder: Border.minSize
+  readonly property int maxBorder: Border.maxSize
+  readonly property int minRounding: Rounding.minSize
+  readonly property int maxRounding: Rounding.maxSize
   readonly property int minTransitions: 0
   readonly property int maxTransitions: 1000
-  readonly property int minOpacity: 50
-  readonly property int maxOpacity: 100
+  readonly property int minOpacity: Opacity.minPct
+  readonly property int maxOpacity: Opacity.maxPct
   readonly property int sliderRowHeight: Math.max(
     Style.space(72),
     Style.font.caption + Style.spacing.controlGap + Math.max(Style.space(22), Math.round(Style.spacing.controlHeight * 0.38) + Style.spacing.md)
@@ -59,9 +59,6 @@ Item {
   property int pendingBlur: -1
   property int appliedBlur: -1
   property int liveBlur: 0
-  property bool appliedBlurEnabled: false
-  property bool haveAppliedBlurEnabled: false
-  property string pendingTerminalBlurAlpha: ""
 
   property int previewGaps: -1
   property int pendingGaps: -1
@@ -80,14 +77,10 @@ Item {
   property bool havePendingShadow: false
 
   property var opacityGroups: []
-  property string activeOpacityGroupId: ""
   property string pendingOpacityGroupId: ""
-  property int pendingOpacityActive: -1
-  property int pendingOpacityInactive: -1
   property var previewOpacity: ({})
   property int liveGlobalActive: 100
   property int liveGlobalInactive: 100
-  property bool pendingOpacityAll: false
 
   readonly property int displayedBlur: {
     if (root.previewBlur >= 0)
@@ -289,58 +282,17 @@ Item {
     return id === root.blurItemId || root.isLookSlider(id) || !!root.groupIdFromSlider(id)
   }
 
-  function findGroup(groupId) {
-    var id = String(groupId || "")
-    for (var i = 0; i < root.opacityGroups.length; i++) {
-      if (String(root.opacityGroups[i].id) === id)
-        return root.opacityGroups[i]
-    }
-    return null
-  }
-
-  function clampOpacityPercent(value) {
-    var next = Math.round(Number(value))
-    if (!isFinite(next))
-      return root.minOpacity
-    return Math.max(root.minOpacity, Math.min(root.maxOpacity, next))
-  }
-
   function displayedOpacity(groupId, channel) {
     var key = String(groupId || "") + ":" + String(channel || "")
     if (root.previewOpacity && root.previewOpacity[key] !== undefined)
-      return root.clampOpacityPercent(root.previewOpacity[key])
-    if (String(groupId) === "global")
-      return root.clampOpacityPercent(channel === "inactive" ? root.liveGlobalInactive : root.liveGlobalActive)
-    var g = root.findGroup(groupId)
-    if (!g)
-      return root.maxOpacity
-    return root.clampOpacityPercent(channel === "inactive" ? g.inactive : g.active)
+      return Opacity.clamp(root.previewOpacity[key])
+    return Opacity.valueOf(root.opacityGroups, groupId, channel)
   }
 
   function syncGlobalFromGroups() {
-    if (!root.opacityGroups.length) {
-      root.liveGlobalActive = 100
-      root.liveGlobalInactive = 100
-      return
-    }
-    var a0 = root.clampOpacityPercent(root.opacityGroups[0].active)
-    var i0 = root.clampOpacityPercent(root.opacityGroups[0].inactive)
-    var sameA = true
-    var sameI = true
-    var sumA = 0
-    var sumI = 0
-    for (var i = 0; i < root.opacityGroups.length; i++) {
-      var a = root.clampOpacityPercent(root.opacityGroups[i].active)
-      var n = root.clampOpacityPercent(root.opacityGroups[i].inactive)
-      sumA += a
-      sumI += n
-      if (a !== a0)
-        sameA = false
-      if (n !== i0)
-        sameI = false
-    }
-    root.liveGlobalActive = sameA ? a0 : Math.round(sumA / root.opacityGroups.length)
-    root.liveGlobalInactive = sameI ? i0 : Math.round(sumI / root.opacityGroups.length)
+    var g = Opacity.globalPair(root.opacityGroups)
+    root.liveGlobalActive = g.active
+    root.liveGlobalInactive = g.inactive
   }
 
   function opacityStatus(groupId) {
@@ -389,7 +341,7 @@ Item {
     }
     if (!isFinite(size) || size < 0)
       size = 0
-    var next = enabled ? Math.max(root.minBlur, Math.min(root.maxBlur, size)) : 0
+    var next = enabled ? Frosting.clamp(size) : 0
     root.liveBlur = next
     if (root.previewBlur >= 0 && root.liveBlur === root.previewBlur)
       root.previewBlur = -1
@@ -426,9 +378,9 @@ Item {
       return fallback
     }
     var shadowBefore = root.displayedShadow
-    root.liveGaps = Math.max(root.minGaps, Math.min(root.maxGaps, parseIntOpt(parts[0], root.liveGaps)))
-    root.liveBorder = Math.max(root.minBorder, Math.min(root.maxBorder, parseIntOpt(parts[1], root.liveBorder)))
-    root.liveRounding = Math.max(root.minRounding, Math.min(root.maxRounding, parseIntOpt(parts[2], root.liveRounding)))
+    root.liveGaps = Gaps.clamp(parseIntOpt(parts[0], root.liveGaps))
+    root.liveBorder = Border.clamp(parseIntOpt(parts[1], root.liveBorder))
+    root.liveRounding = Rounding.clamp(parseIntOpt(parts[2], root.liveRounding))
     root.liveShadow = parseBoolOpt(parts[3], root.liveShadow)
     root.liveTransitions = Math.max(root.minTransitions, Math.min(root.maxTransitions, parseIntOpt(parts[4], root.liveTransitions)))
     if (root.previewGaps >= 0 && root.liveGaps === root.previewGaps)
@@ -449,20 +401,7 @@ Item {
   }
 
   function applyOpacityGroups(groups) {
-    var list = groups || []
-    var next = []
-    for (var i = 0; i < list.length; i++) {
-      var g = list[i] || {}
-      next.push({
-        id: String(g.id || ""),
-        label: String(g.label || g.id || ""),
-        icon: String(g.icon || "󰂵"),
-        active: root.clampOpacityPercent(g.active),
-        inactive: root.clampOpacityPercent(g.inactive),
-        rules: g.rules || []
-      })
-    }
-    root.opacityGroups = next
+    root.opacityGroups = Opacity.copyGroups(groups)
     root.previewOpacity = ({})
     root.syncGlobalFromGroups()
     root.changed()
@@ -470,17 +409,19 @@ Item {
 
   function resetOpacityDefaults() {
     root.applyOpacityGroups(Opacity.reset())
-    root.pendingOpacityAll = true
     root.pendingOpacityGroupId = "global"
-    root.pendingOpacityActive = root.liveGlobalActive
-    root.pendingOpacityInactive = root.liveGlobalInactive
     root.flushOpacity()
   }
 
   function loadDesktop() {
     root.loadBlur()
     root.loadLook()
-    root.loadOpacityGroups()
+  }
+
+  function loadOpacityGroups() {
+    if (root.opacityGroups.length)
+      return
+    root.applyOpacityGroups(Opacity.scan())
   }
 
   function loadBlur() {
@@ -491,10 +432,6 @@ Item {
   function loadLook() {
     if (!lookReadProc.running)
       lookReadProc.running = true
-  }
-
-  function loadOpacityGroups() {
-    root.applyOpacityGroups(Opacity.scan())
   }
 
   function setPosition(name) {
@@ -515,14 +452,11 @@ Item {
   }
 
   function setBlur(value, persist) {
-    var next = Math.round(Number(value))
-    if (!isFinite(next))
-      return
-    next = Math.max(root.minBlur, Math.min(root.maxBlur, next))
+    var next = Frosting.clamp(value)
     root.previewBlur = next
     root.liveBlur = next
     root.pendingBlur = next
-    // flushBlur applies hypr + terminal configs (foot cannot hot-reload).
+    // Frosting only — never touches Opacity.
     liveBlurTimer.interval = persist ? 40 : 80
     liveBlurTimer.restart()
   }
@@ -539,34 +473,30 @@ Item {
   }
 
   function setGaps(value, persist) {
-    var next = root.clampLook(value, root.minGaps, root.maxGaps)
+    var next = Gaps.clamp(value)
     root.previewGaps = next
     root.liveGaps = next
     root.pendingGaps = next
-    liveLookTimer.restart()
-    lookPersistTimer.interval = persist ? 80 : 450
-    lookPersistTimer.restart()
-    // Slider UI binds to displayed*; avoid list rebuild (hover would steal focus).
+    liveGapsTimer.interval = persist ? 40 : 80
+    liveGapsTimer.restart()
   }
 
   function setBorder(value, persist) {
-    var next = root.clampLook(value, root.minBorder, root.maxBorder)
+    var next = Border.clamp(value)
     root.previewBorder = next
     root.liveBorder = next
     root.pendingBorder = next
-    liveLookTimer.restart()
-    lookPersistTimer.interval = persist ? 80 : 450
-    lookPersistTimer.restart()
+    liveBorderTimer.interval = persist ? 40 : 80
+    liveBorderTimer.restart()
   }
 
   function setRounding(value, persist) {
-    var next = root.clampLook(value, root.minRounding, root.maxRounding)
+    var next = Rounding.clamp(value)
     root.previewRounding = next
     root.liveRounding = next
     root.pendingRounding = next
-    liveLookTimer.restart()
-    lookPersistTimer.interval = persist ? 80 : 450
-    lookPersistTimer.restart()
+    liveRoundingTimer.interval = persist ? 40 : 80
+    liveRoundingTimer.restart()
   }
 
   function setTransitions(value, persist) {
@@ -617,69 +547,20 @@ Item {
       root.setTransitions(value, persist)
   }
 
-  function updateGroupValue(groupId, channel, value) {
-    var next = root.clampOpacityPercent(value)
-    var groups = []
-    for (var i = 0; i < root.opacityGroups.length; i++) {
-      var src = root.opacityGroups[i]
-      if (String(src.id) !== String(groupId)) {
-        groups.push(src)
-        continue
-      }
-      groups.push({
-        id: src.id,
-        label: src.label,
-        icon: src.icon,
-        active: channel === "inactive" ? src.active : next,
-        inactive: channel === "inactive" ? next : src.inactive,
-        rules: src.rules
-      })
-    }
-    root.opacityGroups = groups
-  }
-
-  function updateAllGroupValues(channel, value) {
-    var next = root.clampOpacityPercent(value)
-    var groups = []
-    for (var i = 0; i < root.opacityGroups.length; i++) {
-      var src = root.opacityGroups[i]
-      groups.push({
-        id: src.id,
-        label: src.label,
-        icon: src.icon,
-        active: channel === "inactive" ? src.active : next,
-        inactive: channel === "inactive" ? next : src.inactive,
-        rules: src.rules
-      })
-    }
-    root.opacityGroups = groups
-    if (channel === "inactive")
-      root.liveGlobalInactive = next
-    else
-      root.liveGlobalActive = next
-  }
-
   function setGroupOpacity(groupId, channel, value, persist) {
     if (String(groupId) === "global") {
       root.setGlobalOpacity(channel, value, persist)
       return
     }
-    var next = root.clampOpacityPercent(value)
+    var next = Opacity.clamp(value)
     var key = String(groupId) + ":" + String(channel)
     var preview = ({})
     for (var k in root.previewOpacity)
       preview[k] = root.previewOpacity[k]
     preview[key] = next
     root.previewOpacity = preview
-    root.updateGroupValue(groupId, channel, next)
-    root.pendingOpacityAll = false
+    root.opacityGroups = Opacity.setGroup(root.opacityGroups, groupId, channel, next)
     root.pendingOpacityGroupId = String(groupId)
-    root.pendingOpacityActive = root.displayedOpacity(groupId, "active")
-    root.pendingOpacityInactive = root.displayedOpacity(groupId, "inactive")
-    if (channel === "active")
-      root.pendingOpacityActive = next
-    else
-      root.pendingOpacityInactive = next
     liveOpacityTimer.restart()
     opacityPersistTimer.interval = persist ? 80 : 450
     opacityPersistTimer.restart()
@@ -687,23 +568,20 @@ Item {
   }
 
   function setGlobalOpacity(channel, value, persist) {
-    var next = root.clampOpacityPercent(value)
+    var next = Opacity.clamp(value)
     var key = "global:" + String(channel)
     var preview = ({})
     for (var k in root.previewOpacity)
       preview[k] = root.previewOpacity[k]
     preview[key] = next
-    // Parent Opacity status refreshes on navigateBack rebuild.
     for (var i = 0; i < root.opacityGroups.length; i++) {
       var gid = String(root.opacityGroups[i].id)
       preview[gid + ":" + String(channel)] = next
     }
     root.previewOpacity = preview
-    root.updateAllGroupValues(channel, next)
-    root.pendingOpacityAll = true
+    root.opacityGroups = Opacity.setAll(root.opacityGroups, channel, next)
     root.pendingOpacityGroupId = "global"
-    root.pendingOpacityActive = root.liveGlobalActive
-    root.pendingOpacityInactive = root.liveGlobalInactive
+    root.syncGlobalFromGroups()
     liveOpacityTimer.restart()
     opacityPersistTimer.interval = persist ? 80 : 450
     opacityPersistTimer.restart()
@@ -737,358 +615,65 @@ Item {
     root.setGroupOpacity(gid, channel, root.displayedOpacity(gid, channel) + delta, true)
   }
 
-  function blurPasses(size) {
-    if (size <= 0)
-      return 1
-    return Math.max(1, Math.min(5, Math.ceil(size / 4)))
-  }
-
-  function blurLua(enabled, size, passes) {
-    var config = enabled
-      ? ("hl.config({ decoration = { blur = { enabled = true, size = "
-        + size + ", passes = " + passes + ", ignore_opacity = true } } })")
-      : "hl.config({ decoration = { blur = { enabled = false } } })"
-    var layer = enabled
-      ? 'hl.layer_rule({ name = "comtrol-blur", match = { namespace = "comtrol-menu" }, blur = true, ignore_alpha = 0 })'
-      : 'hl.layer_rule({ name = "comtrol-blur", match = { namespace = "comtrol-menu" }, blur = false })'
-    return config + "; " + layer
-  }
-
-  // Backdrop blur is invisible on fully opaque windows. When blur is on:
-  // - default/browser: punch through 100% with Omarchy-like 98/96
-  // - terminal: Hyprland opacity → 100% live (settings untouched); client-side
-  //   alpha in foot/kitty/… uses the Terminal opacity from Opacity settings
-  // Leave media/steam/qemu/etc. opaque — those groups opt out on purpose.
-  function blurAffectsTerminal() {
-    return root.displayedBlur > 0
-  }
-
-  function terminalClientAlpha() {
-    for (var i = 0; i < root.opacityGroups.length; i++) {
-      var g = root.opacityGroups[i]
-      if (String(g.id || "") !== "terminal")
-        continue
-      return (root.clampOpacityPercent(g.active) / 100).toFixed(2)
-    }
-    return "1.00"
-  }
-
-  // Hyprland-facing groups: while blur is on, terminal must stay at 100% so
-  // client alpha alone drives frost. Saved Opacity settings stay as the user set.
-  function opacityGroupsForHyprland() {
-    if (!root.blurAffectsTerminal())
-      return root.opacityGroups
-    var out = []
-    for (var i = 0; i < root.opacityGroups.length; i++) {
-      var src = root.opacityGroups[i]
-      if (String(src.id || "") === "terminal") {
-        out.push({
-          id: src.id,
-          label: src.label,
-          icon: src.icon,
-          active: 100,
-          inactive: 100,
-          rules: src.rules
-        })
-      } else {
-        out.push(src)
-      }
-    }
-    return out
-  }
-
-  function syncTerminalClientAlphaIfBlur() {
-    if (!root.blurAffectsTerminal())
-      return
-    root.pendingTerminalBlurAlpha = root.terminalClientAlpha()
-    root.persistBlurPending()
-  }
-
-  function ensureBlurVisibleOpacity() {
-    if (!root.opacityGroups.length)
-      root.loadOpacityGroups()
-    if (!root.opacityGroups.length)
-      return false
-    var clampIds = ({ default: true, browser: true })
-    var changed = false
-    var groups = []
-    for (var i = 0; i < root.opacityGroups.length; i++) {
-      var src = root.opacityGroups[i]
-      var id = String(src.id || "")
-      var active = root.clampOpacityPercent(src.active)
-      var inactive = root.clampOpacityPercent(src.inactive)
-      if (clampIds[id]) {
-        if (active >= 100) {
-          active = 98
-          changed = true
-        }
-        if (inactive >= 100) {
-          inactive = 96
-          changed = true
-        }
-      }
-      groups.push({
-        id: src.id,
-        label: src.label,
-        icon: src.icon,
-        active: active,
-        inactive: inactive,
-        rules: src.rules
-      })
-    }
-    if (!changed)
-      return false
-    root.applyOpacityGroups(groups)
-    root.pendingOpacityAll = true
-    root.pendingOpacityGroupId = "global"
-    root.pendingOpacityActive = root.liveGlobalActive
-    root.pendingOpacityInactive = root.liveGlobalInactive
-    root.flushOpacity()
-    opacityPersistTimer.interval = 80
-    opacityPersistTimer.restart()
-    return true
-  }
-
   function flushBlur() {
     var next = root.pendingBlur
     if (next < 0)
       return
-    var enabled = next > 0
-    var size = enabled ? next : 1
-    var passes = root.blurPasses(next)
-    var prevApplied = root.appliedBlur
-    var lua = root.blurLua(enabled, size, passes)
-    // Size-only updates can leave stale blur buffers on some surfaces; bounce
-    // enabled so every window picks up the new kernel.
-    if (enabled && prevApplied > 0 && prevApplied !== next)
-      lua = "hl.config({ decoration = { blur = { enabled = false } } }); " + lua
+    var lua = Frosting.evalLua(next, root.appliedBlur)
     root.appliedBlur = next
-    if (enabled)
-      root.pendingTerminalBlurAlpha = root.terminalClientAlpha()
     Util.execArgv(["hyprctl", "eval", lua])
-    if (enabled)
-      root.ensureBlurVisibleOpacity()
-    // Re-apply window opacities: terminal → 100 on Hyprland while blur is on,
-    // or restore the Opacity-menu values when blur turns off.
-    root.pendingOpacityAll = true
-    root.pendingOpacityGroupId = "global"
-    root.pendingOpacityActive = root.liveGlobalActive
-    root.pendingOpacityInactive = root.liveGlobalInactive
-    root.flushOpacity()
-    // Foot/kitty cannot hot-reload blur; write configs immediately so the next
-    // terminal spawn picks up client alpha + foot's protocol blur.
-    root.persistBlurPending()
-    if (!root.haveAppliedBlurEnabled || enabled !== root.appliedBlurEnabled) {
-      root.haveAppliedBlurEnabled = true
-      root.appliedBlurEnabled = enabled
-    }
+    Frosting.save(next)
   }
 
-  function lookLua(gaps, border, rounding, shadow, transitions) {
-    var gout = gaps <= 0 ? 0 : gaps * 2
+  function flushGaps() {
+    var next = root.pendingGaps
+    if (next < 0)
+      return
+    Util.execArgv(["hyprctl", "eval", Gaps.evalLua(next)])
+    Gaps.save(next)
+  }
+
+  function flushBorder() {
+    var next = root.pendingBorder
+    if (next < 0)
+      return
+    Util.execArgv(["hyprctl", "eval", Border.evalLua(next)])
+    Border.save(next)
+  }
+
+  function flushRounding() {
+    var next = root.pendingRounding
+    if (next < 0)
+      return
+    Util.execArgv(["hyprctl", "eval", Rounding.evalLua(next)])
+    Rounding.save(next)
+  }
+
+  function lookLua(shadow, transitions) {
     var ms = Math.max(0, Math.round(Number(transitions) || 0))
     var enabled = ms > 0
-    // Hyprland animation SPEED unit ≈ 100ms.
     var speed = enabled ? (Math.max(1, Math.round((ms / 100) * 100) / 100)) : 1
     var animConfig = "hl.config({ animations = { enabled = " + (enabled ? "true" : "false") + " } })"
     var animGlobal = enabled
       ? ("; hl.animation({ leaf = \"global\", enabled = true, speed = " + speed + ", bezier = \"default\" })")
       : ""
-    return "hl.config({ general = { gaps_in = " + gaps
-      + ", gaps_out = " + gout
-      + ", border_size = " + border
-      + " }, decoration = { rounding = " + rounding
-      + ", shadow = { enabled = " + (shadow ? "true" : "false")
+    return "hl.config({ decoration = { shadow = { enabled = " + (shadow ? "true" : "false")
       + " } } }); " + animConfig + animGlobal
   }
 
   function flushLook() {
-    var gaps = root.pendingGaps >= 0 ? root.pendingGaps : root.displayedGaps
-    var border = root.pendingBorder >= 0 ? root.pendingBorder : root.displayedBorder
-    var rounding = root.pendingRounding >= 0 ? root.pendingRounding : root.displayedRounding
     var transitions = root.pendingTransitions >= 0 ? root.pendingTransitions : root.displayedTransitions
     var shadow = root.displayedShadow
-    Util.execArgv(["hyprctl", "eval", root.lookLua(gaps, border, rounding, shadow, transitions)])
-  }
-
-  function flushOpacity() {
-    var gid = root.pendingOpacityGroupId
-    if (!gid)
-      return
-    var lua = ""
-    if (root.pendingOpacityAll || gid === "global") {
-      lua = Opacity.evalAll(root.opacityGroupsForHyprland())
-    } else {
-      var active = root.pendingOpacityActive >= 0 ? root.pendingOpacityActive : root.displayedOpacity(gid, "active")
-      var inactive = root.pendingOpacityInactive >= 0 ? root.pendingOpacityInactive : root.displayedOpacity(gid, "inactive")
-      if (String(gid) === "terminal" && root.blurAffectsTerminal()) {
-        active = 100
-        inactive = 100
-      } else {
-        active = root.clampOpacityPercent(active)
-        inactive = root.clampOpacityPercent(inactive)
-      }
-      lua = Opacity.evalGroup(gid, active, inactive)
-    }
-    if (!lua)
-      return
-    Util.execArgv(["hyprctl", "eval", lua])
-    if (root.blurAffectsTerminal()
-        && (root.pendingOpacityAll || gid === "global" || String(gid) === "terminal"))
-      root.syncTerminalClientAlphaIfBlur()
-  }
-
-  function persistBlurPending() {
-    var next = root.pendingBlur
-    if (next < 0)
-      next = root.displayedBlur
-    var enabled = next > 0
-    var size = enabled ? next : 1
-    var passes = root.blurPasses(next)
-    var alpha = enabled
-      ? (root.pendingTerminalBlurAlpha || root.terminalClientAlpha())
-      : root.terminalClientAlpha()
-    root.persistBlur(enabled, size, passes, alpha)
+    Util.execArgv(["hyprctl", "eval", root.lookLua(shadow, transitions)])
   }
 
   function persistLookPending() {
-    var gaps = root.pendingGaps >= 0 ? root.pendingGaps : root.displayedGaps
-    var border = root.pendingBorder >= 0 ? root.pendingBorder : root.displayedBorder
-    var rounding = root.pendingRounding >= 0 ? root.pendingRounding : root.displayedRounding
     var transitions = root.pendingTransitions >= 0 ? root.pendingTransitions : root.displayedTransitions
     var shadow = root.displayedShadow
-    root.persistLook(gaps, border, rounding, shadow, transitions)
+    root.persistLook(shadow, transitions)
   }
 
-  function persistOpacityPending() {
-    Opacity.save(root.opacityGroups)
-  }
-
-  function persistBlur(enabled, size, passes, alpha) {
-    var a = String(alpha || root.terminalClientAlpha() || "1.00")
-    Util.execArgv([
-      "python3", "-c",
-      [
-        "import pathlib, subprocess, sys",
-        "enabled, size, passes, alpha = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]",
-        "def upsert(path, begin, end, block):",
-        "    path = pathlib.Path(path)",
-        "    text = path.read_text() if path.exists() else ''",
-        "    start = text.find(begin)",
-        "    if not block:",
-        "        if start < 0:",
-        "            return False",
-        "        stop = text.find(end, start)",
-        "        if stop < 0:",
-        "            return False",
-        "        stop += len(end)",
-        "        if stop < len(text) and text[stop] == '\\n':",
-        "            stop += 1",
-        "        nxt = text[:start] + text[stop:]",
-        "        if nxt == text:",
-        "            return False",
-        "        path.write_text(nxt)",
-        "        return True",
-        "    if not block.endswith('\\n'):",
-        "        block += '\\n'",
-        "    if start >= 0:",
-        "        stop = text.find(end, start)",
-        "        if stop >= 0:",
-        "            stop += len(end)",
-        "            if stop < len(text) and text[stop] == '\\n':",
-        "                stop += 1",
-        "            nxt = text[:start] + block + text[stop:]",
-        "        else:",
-        "            nxt = text.rstrip() + '\\n\\n' + block",
-        "    else:",
-        "        nxt = text",
-        "        if nxt and not nxt.endswith('\\n'):",
-        "            nxt += '\\n'",
-        "        nxt += ('\\n' if nxt else '') + block",
-        "    if nxt == text:",
-        "        return False",
-        "    path.parent.mkdir(parents=True, exist_ok=True)",
-        "    path.write_text(nxt)",
-        "    return True",
-        "hypr = (",
-        "    '-- BEGIN COMTROL-BLUR\\n'",
-        "    'hl.config({\\n'",
-        "    '  decoration = {\\n'",
-        "    '    blur = {\\n'",
-        "    f'      enabled = {enabled},\\n'",
-        "    f'      size = {size},\\n'",
-        "    f'      passes = {passes},\\n'",
-        "    '      ignore_opacity = true,\\n'",
-        "    '    },\\n'",
-        "    '  },\\n'",
-        "    '})\\n'",
-        "    'hl.layer_rule({\\n'",
-        "    '  name = \"comtrol-blur\",\\n'",
-        "    '  match = { namespace = \"comtrol-menu\" },\\n'",
-        "    f'  blur = {enabled},\\n'",
-        "    '  ignore_alpha = 0,\\n'",
-        "    '})\\n'",
-        "    '-- END COMTROL-BLUR'",
-        ")",
-        "upsert(pathlib.Path.home() / '.config/hypr/looknfeel.lua', '-- BEGIN COMTROL-BLUR', '-- END COMTROL-BLUR', hypr)",
-        // Terminals paint opaque backgrounds; Hyprland window opacity alone
-        // does not produce backdrop blur there. Set client-side alpha instead
-        // from Appearance → Opacity → Terminal (not a hardcoded value).
-        "home = pathlib.Path.home()",
-        "on = enabled == 'true'",
-        // Foot: client alpha alone is see-through without frost. blur=yes uses
-        // ext-background-effect-v1 (Hyprland supports it). Foot cannot hot-reload
-        // config (SIGUSR1 only switches dark/light) — new windows pick this up.
-        "foot_block = '' if not on else (",
-        "    '# BEGIN COMTROL-BLUR\\n'",
-        "    '[colors-dark]\\n'",
-        "    f'alpha={alpha}\\n'",
-        "    'alpha-mode=all\\n'",
-        "    'blur=yes\\n'",
-        "    '[colors-light]\\n'",
-        "    f'alpha={alpha}\\n'",
-        "    'alpha-mode=all\\n'",
-        "    'blur=yes\\n'",
-        "    '# END COMTROL-BLUR'",
-        ")",
-        "kitty_block = '' if not on else (",
-        "    '# BEGIN COMTROL-BLUR\\n'",
-        "    f'background_opacity {alpha}\\n'",
-        "    'background_blur 16\\n'",
-        "    '# END COMTROL-BLUR'",
-        ")",
-        "alacritty_block = '' if not on else (",
-        "    '# BEGIN COMTROL-BLUR\\n'",
-        "    '[window]\\n'",
-        "    f'opacity = {alpha}\\n'",
-        "    '# END COMTROL-BLUR'",
-        ")",
-        "ghostty_block = '' if not on else (",
-        "    '# BEGIN COMTROL-BLUR\\n'",
-        "    f'background-opacity = {alpha}\\n'",
-        "    '# END COMTROL-BLUR'",
-        ")",
-        "foot = home / '.config/foot/foot.ini'",
-        "if foot.exists():",
-        "    upsert(foot, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', foot_block)",
-        "kitty = home / '.config/kitty/kitty.conf'",
-        "if kitty.exists():",
-        "    upsert(kitty, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', kitty_block)",
-        "alacritty = home / '.config/alacritty/alacritty.toml'",
-        "if alacritty.exists():",
-        "    upsert(alacritty, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', alacritty_block)",
-        "ghostty = home / '.config/ghostty/config'",
-        "if ghostty.exists():",
-        "    upsert(ghostty, '# BEGIN COMTROL-BLUR', '# END COMTROL-BLUR', ghostty_block)"
-      ].join("\n"),
-      enabled ? "true" : "false",
-      String(size),
-      String(passes),
-      a
-    ])
-  }
-
-  function persistLook(gaps, border, rounding, shadow, transitions) {
+  function persistLook(shadow, transitions) {
     var ms = Math.max(0, Math.round(Number(transitions) || 0))
     var enabled = ms > 0
     var speed = enabled ? (Math.max(1, Math.round((ms / 100) * 100) / 100)) : 1
@@ -1096,8 +681,7 @@ Item {
       "python3", "-c",
       [
         "import pathlib, sys",
-        "gaps, border, rounding, shadow, enabled, speed = sys.argv[1:7]",
-        "gout = '0' if int(gaps) <= 0 else str(int(gaps) * 2)",
+        "shadow, enabled, speed = sys.argv[1:4]",
         "def upsert(path, begin, end, block):",
         "    path = pathlib.Path(path)",
         "    text = path.read_text() if path.exists() else ''",
@@ -1143,13 +727,7 @@ Item {
         "hypr = (",
         "    '-- BEGIN COMTROL-LOOK\\n'",
         "    'hl.config({\\n'",
-        "    '  general = {\\n'",
-        "    f'    gaps_in = {gaps},\\n'",
-        "    f'    gaps_out = {gout},\\n'",
-        "    f'    border_size = {border},\\n'",
-        "    '  },\\n'",
         "    '  decoration = {\\n'",
-        "    f'    rounding = {rounding},\\n'",
         "    '    shadow = {\\n'",
         "    f'      enabled = {shadow},\\n'",
         "    '    },\\n'",
@@ -1160,13 +738,24 @@ Item {
         ")",
         "upsert(pathlib.Path.home() / '.config/hypr/looknfeel.lua', '-- BEGIN COMTROL-LOOK', '-- END COMTROL-LOOK', hypr)"
       ].join("\n"),
-      String(gaps),
-      String(border),
-      String(rounding),
       shadow ? "true" : "false",
       enabled ? "true" : "false",
       String(speed)
     ])
+  }
+
+  function flushOpacity() {
+    var gid = root.pendingOpacityGroupId
+    if (!gid)
+      return
+    var lua = Opacity.evalLua(root.opacityGroups, gid)
+    if (!lua)
+      return
+    Util.execArgv(["hyprctl", "eval", lua])
+  }
+
+  function persistOpacityPending() {
+    Opacity.save(root.opacityGroups)
   }
 
   function sliderRoleFor(itemId) {
@@ -1192,7 +781,10 @@ Item {
     return root.groupIdFromSlider(itemId)
   }
 
-  Component.onCompleted: root.loadDesktop()
+  Component.onCompleted: {
+    root.loadDesktop()
+    root.loadOpacityGroups()
+  }
 
   FileView {
     path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
@@ -1253,6 +845,27 @@ Item {
     interval: 40
     repeat: false
     onTriggered: root.flushBlur()
+  }
+
+  Timer {
+    id: liveGapsTimer
+    interval: 40
+    repeat: false
+    onTriggered: root.flushGaps()
+  }
+
+  Timer {
+    id: liveBorderTimer
+    interval: 40
+    repeat: false
+    onTriggered: root.flushBorder()
+  }
+
+  Timer {
+    id: liveRoundingTimer
+    interval: 40
+    repeat: false
+    onTriggered: root.flushRounding()
   }
 
   Timer {

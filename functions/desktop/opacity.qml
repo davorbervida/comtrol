@@ -3,7 +3,8 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
-// Hyprland window opacity groups — pure QML (replaces opacity_groups.py).
+// Window opacity only — Hyprland window rules + terminal client alpha.
+// Never writes frosting / blur (owned by Frosting).
 Item {
   id: root
 
@@ -14,6 +15,15 @@ Item {
   readonly property string opacityFile: root.userHypr + "/comtrol-opacity.lua"
   readonly property string looknfeelFile: root.userHypr + "/looknfeel.lua"
   readonly property string hyprlandFile: root.userHypr + "/hyprland.lua"
+  readonly property string footFile: root.home + "/.config/foot/foot.ini"
+  readonly property string kittyFile: root.home + "/.config/kitty/kitty.conf"
+  readonly property string alacrittyFile: root.home + "/.config/alacritty/alacritty.toml"
+  readonly property string ghosttyFile: root.home + "/.config/ghostty/config"
+
+  property int lastGlobalActive: 100
+  property int lastGlobalInactive: 100
+  readonly property int minPct: 50
+  readonly property int maxPct: 100
 
   readonly property string mediaClass: "^(zoom|vlc|mpv|org.kde.kdenlive|com.obsproject.Studio|com.github.PintaProject.Pinta|imv|org.gnome.NautilusPreviewer)$"
 
@@ -148,11 +158,122 @@ Item {
     }
   }
 
-  function clampPct(n) {
+  function clamp(n) {
     var v = Math.round(Number(n))
     if (!isFinite(v))
-      return 100
-    return Math.max(1, Math.min(100, v))
+      return root.minPct
+    return Math.max(root.minPct, Math.min(root.maxPct, v))
+  }
+
+  function copyGroup(g) {
+    var src = g || {}
+    return {
+      id: String(src.id || ""),
+      label: String(src.label || src.id || ""),
+      icon: String(src.icon || "󰂵"),
+      active: root.clamp(src.active),
+      inactive: root.clamp(src.inactive),
+      rules: src.rules || []
+    }
+  }
+
+  function copyGroups(groups) {
+    var list = groups || []
+    var out = []
+    for (var i = 0; i < list.length; i++)
+      out.push(root.copyGroup(list[i]))
+    return out
+  }
+
+  function findGroup(groups, groupId) {
+    var id = String(groupId || "")
+    var list = groups || []
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].id) === id)
+        return list[i]
+    }
+    return null
+  }
+
+  // Global is a master control, not an average. Fine-tuned groups stay
+  // as they are; the Global slider keeps the last value the user set.
+  function globalPair(groups) {
+    var list = groups || []
+    if (!list.length)
+      return { active: root.lastGlobalActive, inactive: root.lastGlobalInactive }
+    var a0 = root.clamp(list[0].active)
+    var i0 = root.clamp(list[0].inactive)
+    var sameA = true
+    var sameI = true
+    for (var i = 0; i < list.length; i++) {
+      if (root.clamp(list[i].active) !== a0)
+        sameA = false
+      if (root.clamp(list[i].inactive) !== i0)
+        sameI = false
+    }
+    return {
+      active: sameA ? a0 : root.lastGlobalActive,
+      inactive: sameI ? i0 : root.lastGlobalInactive
+    }
+  }
+
+  function valueOf(groups, groupId, channel) {
+    if (String(groupId) === "global") {
+      var g = root.globalPair(groups)
+      return channel === "inactive" ? g.inactive : g.active
+    }
+    var item = root.findGroup(groups, groupId)
+    if (!item)
+      return root.maxPct
+    return channel === "inactive" ? item.inactive : item.active
+  }
+
+  // Fine-tune one group. Does not change other groups.
+  function setGroup(groups, groupId, channel, value) {
+    if (String(groupId) === "global")
+      return root.setAll(groups, channel, value)
+    var next = root.clamp(value)
+    var out = []
+    var list = groups || []
+    for (var i = 0; i < list.length; i++) {
+      var src = list[i]
+      if (String(src.id) !== String(groupId)) {
+        out.push(root.copyGroup(src))
+        continue
+      }
+      out.push({
+        id: src.id,
+        label: src.label,
+        icon: src.icon,
+        active: channel === "inactive" ? src.active : next,
+        inactive: channel === "inactive" ? next : src.inactive,
+        rules: src.rules
+      })
+    }
+    return out
+  }
+
+  // Global: apply the same active/inactive value to every group.
+  function setAll(groups, channel, value) {
+    var next = root.clamp(value)
+    if (channel === "inactive")
+      root.lastGlobalInactive = next
+    else
+      root.lastGlobalActive = next
+    var out = []
+    var list = groups || []
+    for (var i = 0; i < list.length; i++) {
+      var src = list[i]
+      out.push({
+        id: src.id,
+        label: src.label,
+        icon: src.icon,
+        active: channel === "inactive" ? src.active : next,
+        inactive: channel === "inactive" ? next : src.inactive,
+        rules: src.rules
+      })
+    }
+    return out
   }
 
   function parsePair(raw) {
@@ -172,8 +293,8 @@ Item {
     if (nums.length === 1)
       nums.push(nums[0])
     return [
-      root.clampPct(Math.round(nums[0] * 100)),
-      root.clampPct(Math.round(nums[1] * 100))
+      root.clamp(Math.round(nums[0] * 100)),
+      root.clamp(Math.round(nums[1] * 100))
     ]
   }
 
@@ -260,8 +381,8 @@ Item {
         id: g.id,
         label: g.label,
         icon: g.icon,
-        active: root.clampPct(active),
-        inactive: root.clampPct(inactive),
+        active: root.clamp(active),
+        inactive: root.clamp(inactive),
         rules: g.rules
       })
     }
@@ -269,7 +390,14 @@ Item {
   }
 
   function pct(n) {
-    return (root.clampPct(n) / 100).toFixed(2)
+    return (root.clamp(n) / 100).toFixed(2)
+  }
+
+  function terminalAlpha(groups) {
+    var g = root.findGroup(groups, "terminal")
+    if (!g)
+      return "1.00"
+    return root.pct(g.active)
   }
 
   function escapeLuaString(value) {
@@ -337,7 +465,6 @@ Item {
         text += "\n"
       text += (text.length ? "\n" : "") + body
     }
-    root.ensureHyprDir()
     root.writeTextFile(path, text)
   }
 
@@ -391,6 +518,40 @@ Item {
     root.writeTextFile(root.looknfeelFile, text.substring(0, start) + text.substring(stop))
   }
 
+  function saveTerminal(alpha) {
+    var a = String(alpha || "1.00")
+    var foot = "# BEGIN COMTROL-OPACITY\n"
+      + "[colors-dark]\n"
+      + "alpha=" + a + "\n"
+      + "alpha-mode=all\n"
+      + "[colors-light]\n"
+      + "alpha=" + a + "\n"
+      + "alpha-mode=all\n"
+      + "# END COMTROL-OPACITY\n"
+    var kitty = "# BEGIN COMTROL-OPACITY\n"
+      + "background_opacity " + a + "\n"
+      + "# END COMTROL-OPACITY\n"
+    var alacritty = "# BEGIN COMTROL-OPACITY\n"
+      + "[window]\n"
+      + "opacity = " + a + "\n"
+      + "# END COMTROL-OPACITY\n"
+    var ghostty = "# BEGIN COMTROL-OPACITY\n"
+      + "background-opacity = " + a + "\n"
+      + "# END COMTROL-OPACITY\n"
+    var targets = [
+      { path: root.footFile, block: foot },
+      { path: root.kittyFile, block: kitty },
+      { path: root.alacrittyFile, block: alacritty },
+      { path: root.ghosttyFile, block: ghostty }
+    ]
+    for (var i = 0; i < targets.length; i++) {
+      var t = targets[i]
+      if (!root.readTextFile(t.path))
+        continue
+      root.upsertMarker(t.path, "# BEGIN COMTROL-OPACITY", "# END COMTROL-OPACITY", t.block)
+    }
+  }
+
   function rulesForId(gid) {
     var defs = root.groupDefs
     for (var i = 0; i < defs.length; i++) {
@@ -408,8 +569,8 @@ Item {
     for (var i = 0; i < list.length; i++) {
       var g = list[i] || {}
       var gid = String(g.id || "")
-      var active = root.clampPct(g.active)
-      var inactive = root.clampPct(g.inactive)
+      var active = root.clamp(g.active)
+      var inactive = root.clamp(g.inactive)
       var rules = g.rules || root.rulesForId(gid)
       for (var r = 0; r < rules.length; r++) {
         var rule = rules[r] || {}
@@ -429,44 +590,28 @@ Item {
   }
 
   function scan() {
-    return root.buildGroups(true)
+    var groups = root.buildGroups(true)
+    if (groups.length) {
+      var a0 = root.clamp(groups[0].active)
+      var i0 = root.clamp(groups[0].inactive)
+      var sameA = true
+      var sameI = true
+      for (var i = 0; i < groups.length; i++) {
+        if (root.clamp(groups[i].active) !== a0)
+          sameA = false
+        if (root.clamp(groups[i].inactive) !== i0)
+          sameI = false
+      }
+      if (sameA)
+        root.lastGlobalActive = a0
+      if (sameI)
+        root.lastGlobalInactive = i0
+    }
+    return groups
   }
 
   function defaults() {
     return root.buildGroups(false)
-  }
-
-  function reset() {
-    var groups = root.buildGroups(false)
-    root.ensureHyprDir()
-    root.writeTextFile(root.opacityFile, root.renderFile(groups))
-    root.ensureHyprlandRequire()
-    root.stripLegacyLooknfeelOpacity()
-    return groups
-  }
-
-  function save(groups) {
-    var incoming = ({})
-    var list = groups || []
-    for (var i = 0; i < list.length; i++) {
-      var item = list[i] || {}
-      var id = String(item.id || "")
-      if (id)
-        incoming[id] = item
-    }
-    var next = root.buildGroups(true)
-    for (var j = 0; j < next.length; j++) {
-      var g = next[j]
-      if (incoming[g.id]) {
-        g.active = root.clampPct(incoming[g.id].active)
-        g.inactive = root.clampPct(incoming[g.id].inactive)
-      }
-    }
-    root.ensureHyprDir()
-    root.writeTextFile(root.opacityFile, root.renderFile(next))
-    root.ensureHyprlandRequire()
-    root.stripLegacyLooknfeelOpacity()
-    return next
   }
 
   function evalGroup(gid, active, inactive) {
@@ -494,8 +639,8 @@ Item {
         continue
       out.push({
         id: id,
-        active: root.clampPct(item.active !== undefined ? item.active : defs[id].defaults[0]),
-        inactive: root.clampPct(item.inactive !== undefined ? item.inactive : defs[id].defaults[1]),
+        active: root.clamp(item.active !== undefined ? item.active : defs[id].defaults[0]),
+        inactive: root.clamp(item.inactive !== undefined ? item.inactive : defs[id].defaults[1]),
         rules: defs[id].rules
       })
     }
@@ -511,6 +656,50 @@ Item {
       }
     }
     return root.renderEvalLua(out)
+  }
+
+  function evalLua(groups, groupId) {
+    if (!groupId || groupId === "global")
+      return root.evalAll(groups)
+    var g = root.findGroup(groups, groupId)
+    if (!g)
+      return ""
+    return root.evalGroup(groupId, g.active, g.inactive)
+  }
+
+  function save(groups) {
+    var incoming = ({})
+    var list = groups || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {}
+      var id = String(item.id || "")
+      if (id)
+        incoming[id] = item
+    }
+    var next = root.buildGroups(true)
+    for (var j = 0; j < next.length; j++) {
+      var g = next[j]
+      if (incoming[g.id]) {
+        g.active = root.clamp(incoming[g.id].active)
+        g.inactive = root.clamp(incoming[g.id].inactive)
+      }
+    }
+    root.ensureHyprDir()
+    root.writeTextFile(root.opacityFile, root.renderFile(next))
+    root.ensureHyprlandRequire()
+    root.stripLegacyLooknfeelOpacity()
+    root.saveTerminal(root.terminalAlpha(next))
+    return next
+  }
+
+  function reset() {
+    var groups = root.buildGroups(false)
+    root.ensureHyprDir()
+    root.writeTextFile(root.opacityFile, root.renderFile(groups))
+    root.ensureHyprlandRequire()
+    root.stripLegacyLooknfeelOpacity()
+    root.saveTerminal(root.terminalAlpha(groups))
+    return groups
   }
 
   Component.onCompleted: root.ensureHyprDir()

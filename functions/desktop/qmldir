@@ -1,0 +1,5 @@
+singleton Opacity 1.0 opacity.qml
+singleton Frosting 1.0 frosting.qml
+singleton Gaps 1.0 gaps.qml
+singleton Border 1.0 border.qml
+singleton Rounding 1.0 rounding.qml
