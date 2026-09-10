@@ -6,13 +6,38 @@ Omarchy shell **menu** plugin — a control hub for appearance, apps, search, in
 
 Plugin ID: `com.github.davorbervida.comtrol`
 
+## Toggle
+
+Open or close cOMtrol from the shell:
+
+```bash
+omarchy-shell shell toggle com.github.davorbervida.comtrol
+```
+
+### Keybinding
+
+Omarchy does not assign a shortcut on install. Add one in `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + CTRL + SPACE", "cOMtrol", "omarchy-shell shell toggle com.github.davorbervida.comtrol")
+```
+
+Pick any free chord. Check existing binds with `omarchy menu keybindings --print`. If the key is already taken, unbind it first:
+
+```lua
+hl.unbind("SUPER + CTRL + SPACE")
+o.bind("SUPER + CTRL + SPACE", "cOMtrol", "omarchy-shell shell toggle com.github.davorbervida.comtrol")
+```
+
+Hyprland usually reloads on save; otherwise run `hyprctl reload`.
+
 ## Install
 
 ```bash
 omarchy plugin add https://github.com/davorbervida/comtrol.git --enable
 ```
 
-Then open it from the Omarchy menu (or your shell keybinding for this menu plugin).
+Then open it with the toggle command above, a keybinding, or from the Omarchy menu.
 
 ### Web search dependency
 
