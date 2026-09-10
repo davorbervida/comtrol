@@ -3,7 +3,7 @@ import Quickshell.Io
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../../functions/desktop"
+import "../../functions/appearance"
 
 // Appearance → Desktop: bar, frosting, look (gaps/border/rounding/shadow), opacity.
 Item {
@@ -51,6 +51,7 @@ Item {
     Style.space(72),
     Style.font.caption + Style.spacing.controlGap + Math.max(Style.space(22), Math.round(Style.spacing.controlHeight * 0.38) + Style.spacing.md)
   )
+  readonly property int separatorRowHeight: Style.space(12)
 
   property string position: "top"
   property bool transparent: false
@@ -146,7 +147,9 @@ Item {
         kind: "bar-transparency",
         status: root.transparencyLabel
       },
+      { itemId: "desktop.sep.blur", kind: "separator" },
       { itemId: root.blurItemId, label: "Blur", kind: "slider" },
+      { itemId: "desktop.sep.look", kind: "separator" },
       { itemId: root.gapsItemId, label: "Gaps", kind: "slider" },
       { itemId: root.borderItemId, label: "Border", kind: "slider" },
       { itemId: root.roundingItemId, label: "Rounding", kind: "slider" },
@@ -158,6 +161,7 @@ Item {
         kind: "look-shadow",
         status: root.shadowLabel
       },
+      { itemId: "desktop.sep.opacity", kind: "separator" },
       { itemId: root.opacityItemId, label: "Opacity", icon: "󰂵", kind: "menu" }
     ]
   })
@@ -194,6 +198,7 @@ Item {
         status: root.opacityStatus(g.id)
       })
     }
+    rows.push({ itemId: "desktop.opacity.sep.reset", kind: "separator" })
     rows.push({
       itemId: root.resetOpacityItemId,
       label: "Reset defaults",
@@ -224,6 +229,7 @@ Item {
     return id.indexOf(root.opacityItemId + ".") === 0
       && id.indexOf(".active") < 0
       && id.indexOf(".inactive") < 0
+      && id.indexOf(".sep.") < 0
       && id !== root.opacityItemId
       && id !== root.resetOpacityItemId
   }

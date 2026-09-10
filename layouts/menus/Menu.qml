@@ -66,7 +66,7 @@ Item {
   readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
   readonly property bool applicationsMenuActive: !showingResults && activeMenu === "applications"
   readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive || applicationsMenuActive) ? detailRowHeight : rowHeight
-  readonly property bool fontsMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === "fonts"
+  readonly property bool fontsMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceFonts.itemId
   readonly property bool desktopMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceDesktop.itemId
   readonly property bool desktopOpacityGroupActive: !showingResults && filterText.trim().length === 0
     && appearanceDesktop.isOpacityGroupMenu(activeMenu)
@@ -74,9 +74,11 @@ Item {
     var available = Math.max(activeRowHeight, parent.height - Style.gapsOut * 2 - headerHeight - contentSpacing - contentMargin * 2)
     var h
     if (root.fontsMenuActive)
-      h = rowHeight + rowSpacing + appearanceFonts.sliderRowHeight
+      h = 3 * rowHeight + 3 * appearanceFonts.sliderRowHeight
+        + 2 * appearanceFonts.separatorRowHeight + 7 * rowSpacing
     else if (root.desktopMenuActive)
-      h = 4 * rowHeight + 5 * appearanceDesktop.sliderRowHeight + 8 * rowSpacing
+      h = 4 * rowHeight + 5 * appearanceDesktop.sliderRowHeight
+        + 3 * appearanceDesktop.separatorRowHeight + 11 * rowSpacing
     else if (root.desktopOpacityGroupActive)
       h = 2 * appearanceDesktop.sliderRowHeight + rowSpacing
     else
@@ -154,7 +156,7 @@ Item {
         root.enterFontChange()
         return
       }
-      if (root.activeMenu === appearanceFonts.changeItemId) {
+      if (appearanceFonts.isChangeItem(root.activeMenu)) {
         root.rebuildDisplay()
         root.selectedIndex = appearanceFonts.currentIndex
         return
@@ -264,7 +266,9 @@ Item {
     tree[defaultsMenu.editorItemId] = defaultsMenu.editorMenu
     tree[defaultsMenu.agentItemId] = defaultsMenu.agentMenu
     tree[appearanceFonts.itemId] = appearanceFonts.menu
-    tree[appearanceFonts.changeItemId] = appearanceFonts.changeMenu
+    var fontMenus = appearanceFonts.groupMenus()
+    for (var fontKey in fontMenus)
+      tree[fontKey] = fontMenus[fontKey]
     tree[appearanceDesktop.itemId] = appearanceDesktop.menu
     tree[appearanceDesktop.positionItemId] = appearanceDesktop.positionMenu
     var opacityMenus = appearanceDesktop.opacityGroupMenus()
@@ -377,6 +381,8 @@ Item {
   function rowHeightForKind(kind) {
     if (kind === "slider")
       return appearanceFonts.sliderRowHeight
+    if (kind === "separator")
+      return appearanceDesktop.separatorRowHeight
     return root.activeRowHeight
   }
 
@@ -399,8 +405,8 @@ Item {
         || appearanceDesktop.isLookSlider(id)
         || appearanceDesktop.groupIdFromSlider(id))
       appearanceDesktop.adjustSlider(id, delta)
-    else
-      appearanceFonts.adjustSize(delta)
+    else if (appearanceFonts.isSizeSlider(id))
+      appearanceFonts.adjustSize(id, delta)
   }
 
   function noteKeyboardSelection() {
@@ -413,6 +419,9 @@ Item {
 
   function pointerSelect(index) {
     if (root.suppressPointerSelect)
+      return
+    if (index >= 0 && index < displayModel.count
+        && !root.isSelectableKind(displayModel.get(index).kind))
       return
     root.cursorActive = true
     root.selectedIndex = index
@@ -441,8 +450,8 @@ Item {
 
   function enterFontChange() {
     appearanceFonts.awaitingList = false
-    root.navStack = root.ancestorsOf(appearanceFonts.changeItemId)
-    root.activeMenu = appearanceFonts.changeItemId
+    root.navStack = root.ancestorsOf(appearanceFonts.activeChangeId)
+    root.activeMenu = appearanceFonts.activeChangeId
     root.filterText = ""
     root.cursorActive = true
     root.rebuildDisplay()
@@ -451,15 +460,15 @@ Item {
       resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
 
-  function openFontChange() {
-    if (appearanceFonts.fontsReady) {
+  function openFontChange(changeId) {
+    appearanceFonts.openChange(changeId)
+    if (appearanceFonts.listReadyFor(appearanceFonts.activeTarget)) {
       root.enterFontChange()
       return
     }
     appearanceFonts.awaitingList = true
     if (root.activeMenu === appearanceFonts.itemId)
       root.rebuildDisplay()
-    appearanceFonts.loadFonts()
   }
 
   function headerText() {
@@ -514,7 +523,7 @@ Item {
         var itemId = String(row.itemId || "")
         var label = String(row.label || "")
         var kind = String(row.kind || "")
-        if (kind === "slider")
+        if (kind === "slider" || kind === "separator")
           continue
         out.push({
           itemId: itemId,
@@ -720,7 +729,8 @@ Item {
     displayModel.clear()
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i] || {}
-      if (q && (String(row.kind || "") === "slider" || (String(row.kind || "") !== "app" && !root.rowMatchesQuery(row, q))))
+      if (q && (String(row.kind || "") === "slider" || String(row.kind || "") === "separator"
+          || (String(row.kind || "") !== "app" && !root.rowMatchesQuery(row, q))))
         continue
       var label = String(row.label || "")
       if (root.pendingActionDomain
@@ -765,24 +775,38 @@ Item {
     root.rebuildDisplay()
   }
 
+  function isSelectableKind(kind) {
+    var k = String(kind || "")
+    return k !== "separator"
+  }
+
   function select(delta) {
     if (displayModel.count === 0) return
     var wasActive = root.cursorActive
     root.noteKeyboardSelection()
+    var next
     if (!wasActive) {
-      root.selectedIndex = delta < 0 ? displayModel.count - 1 : 0
+      next = delta < 0 ? displayModel.count - 1 : 0
     } else {
-      root.selectedIndex = (root.selectedIndex + delta + displayModel.count) % displayModel.count
+      next = (root.selectedIndex + delta + displayModel.count) % displayModel.count
     }
+    var guard = 0
+    while (!root.isSelectableKind(displayModel.get(next).kind) && guard < displayModel.count) {
+      next = (next + (delta < 0 ? -1 : 1) + displayModel.count) % displayModel.count
+      guard += 1
+    }
+    root.selectedIndex = next
     resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
 
   function activateIndex(index) {
     if (index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
+    if (row.kind === "separator")
+      return
     if (row.kind === "menu") {
-      if (row.itemId === appearanceFonts.changeItemId) {
-        root.openFontChange()
+      if (appearanceFonts.isChangeItem(row.itemId)) {
+        root.openFontChange(row.itemId)
         return
       }
       root.navStack = root.ancestorsOf(row.itemId)
@@ -790,6 +814,8 @@ Item {
       root.filterText = ""
       root.selectedIndex = 0
       root.cursorActive = true
+      if (row.itemId === appearanceFonts.itemId)
+        appearanceFonts.load()
       if (row.itemId === "applications") {
         root.refreshLocalIcons()
         if (root.appLibrary)
@@ -1137,7 +1163,9 @@ Item {
             required property string pluginEnabled
             required property string pluginCanDisable
 
-            readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
+            readonly property bool isSlider: row.kind === "slider"
+            readonly property bool isSeparator: row.kind === "separator"
+            readonly property bool hasCursor: !row.isSeparator && root.cursorActive && index === root.selectedIndex
             readonly property bool hasDetail: detail.length > 0
             readonly property bool isApp: row.kind === "app"
             readonly property bool showPackageRemove: row.kind === "result"
@@ -1150,7 +1178,6 @@ Item {
               && row.pluginCanDisable === "1"
             readonly property bool pluginIsEnabled: row.pluginEnabled === "1"
             readonly property bool showResultIconImage: row.kind === "result" && String(row.appIcon || "").length > 0
-            readonly property bool isSlider: row.kind === "slider"
             readonly property bool hasStatus: row.status.length > 0
             readonly property int toggleWidth: Style.space(84)
             readonly property int removeWidth: Style.space(84)
@@ -1167,12 +1194,12 @@ Item {
             width: ListView.view.width
             height: root.rowHeightForKind(row.kind)
             radius: root.cornerRadius
-            color: hasCursor ? root.selectedBackground : "transparent"
-            borderSpec: hasCursor ? root.selectedBorderSpec : Border.none()
+            color: (row.isSeparator || !hasCursor) ? "transparent" : root.selectedBackground
+            borderSpec: (row.isSeparator || !hasCursor) ? Border.none() : root.selectedBorderSpec
 
             Row {
-              visible: !row.isSlider
-              enabled: !row.isSlider
+              visible: !row.isSlider && !row.isSeparator
+              enabled: !row.isSlider && !row.isSeparator
               anchors.fill: parent
               anchors.leftMargin: Style.space(12)
               anchors.rightMargin: Style.space(12)
@@ -1322,6 +1349,16 @@ Item {
               }
             }
 
+            PanelSeparator {
+              visible: row.isSeparator
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.leftMargin: Style.space(12)
+              anchors.rightMargin: Style.space(12)
+              foreground: root.foreground
+            }
+
             Loader {
               anchors.fill: parent
               anchors.leftMargin: Style.space(12)
@@ -1337,6 +1374,8 @@ Item {
                 if (appearanceDesktop.isDesktopSlider(row.itemId)) {
                   item.role = appearanceDesktop.sliderRoleFor(row.itemId)
                   item.groupId = appearanceDesktop.sliderGroupFor(row.itemId)
+                } else if (appearanceFonts.isSizeSlider(row.itemId)) {
+                  item.target = appearanceFonts.targetFromId(row.itemId)
                 }
               }
             }
@@ -1348,8 +1387,8 @@ Item {
 
             MouseArea {
               anchors.fill: parent
-              visible: !row.isSlider
-              enabled: !row.isSlider
+              visible: !row.isSlider && !row.isSeparator
+              enabled: !row.isSlider && !row.isSeparator
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
               onPositionChanged: root.considerPointerMove(mouse.x, mouse.y)
