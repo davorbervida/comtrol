@@ -243,11 +243,13 @@ Item {
   }
 
   function close() {
+    previewBackground.clear()
     WebBrowser.cool()
     root.opened = false
   }
 
   function dismiss() {
+    previewBackground.clear()
     WebBrowser.cool()
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
@@ -645,6 +647,13 @@ Item {
       root.finishSearch()
       Qt.callLater(root.focusActiveLayout)
     }
+  }
+
+  function refreshBackgroundsList() {
+    if (root.pendingDomain !== "background")
+      return
+    root.backgroundsSerial = Backgrounds.listSerial + 1
+    Backgrounds.list(root.pendingMode || "current")
   }
 
   function packagesToResultRows(packages) {
@@ -1217,7 +1226,7 @@ Item {
       visible: root.usePreviewBackground
       onBackRequested: root.goBack()
       onDismissRequested: root.dismiss()
-      onRefreshRequested: root.runComtrol("background", root.pendingMode, root.resultsTitle)
+      onRefreshRequested: root.refreshBackgroundsList()
     }
 
     Layouts.ApperianceBoot {

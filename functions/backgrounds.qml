@@ -6,6 +6,7 @@ import Qt.labs.folderlistmodel
 
 // Background list / remove — pure QML (no run.sh / cOMtrol / helper scripts).
 // FS scan: FolderListModel. Process only for rm / pkexec (mirrors remove/backgrounds.rs).
+// Thumbnails reuse ~/.cache/omarchy/image-selector (same as omarchy-menu-images).
 Item {
   id: root
 
@@ -29,6 +30,9 @@ Item {
   property string scanRole: "" // themes_root | images
   property string scanListingPath: ""
   property string listMode: "" // current | themes | wallpapers | all
+  property int thumbSerial: 0
+  property var thumbPending: []
+  property var thumbMap: ({})
 
   // Remove pipeline: try rm, optionally escalate to pkexec
   property int removePipeSerial: -1
@@ -67,6 +71,8 @@ Item {
     root.scanQueue = []
     if (removeProc.running)
       removeProc.running = false
+    if (thumbProc.running)
+      thumbProc.running = false
   }
 
   function isImageName(name) {
@@ -102,8 +108,9 @@ Item {
     root.scanQueue = root.buildScanQueue(m)
     root.scanMode = ""
 
+    root.warmThumbRows()
     if (root.cachedMode === m && root.cachedListed && root.cachedListed.length > 0)
-      root.listed(root.cachedListed.slice(), m)
+      root.listed(root.attachKnownThumbs(root.cachedListed), m)
 
     root.drainScanQueue()
     return root.listSerial
@@ -210,9 +217,132 @@ Item {
     items.sort(function(a, b) {
       return String(a.path || "").localeCompare(String(b.path || ""))
     })
+    // Show the picker as soon as the file list exists. Thumbnails attach
+    // from the in-memory Omarchy cache; missing ones resolve in the background.
+    root.emitListed(root.attachKnownThumbs(items))
+    root.resolveThumbs(items)
+  }
+
+  function attachKnownThumbs(items) {
+    var map = root.thumbMap || {}
+    var next = []
+    var list = items || []
+    for (var i = 0; i < list.length; i++) {
+      var path = String((list[i] && list[i].path) || "")
+      if (!path)
+        continue
+      next.push({
+        path: path,
+        thumbnail: map[path] || ""
+      })
+    }
+    return next
+  }
+
+  function mergeThumbMap(text) {
+    var map = {}
+    var prev = root.thumbMap || {}
+    for (var key in prev) {
+      if (prev.hasOwnProperty(key))
+        map[key] = prev[key]
+    }
+    var changed = false
+    var lines = String(text || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var line = String(lines[i] || "").trim()
+      if (!line)
+        continue
+      var tab = line.indexOf("\t")
+      if (tab < 0)
+        continue
+      var image = line.substring(0, tab)
+      var thumb = line.substring(tab + 1)
+      if (!image || !thumb || thumb === image)
+        continue
+      if (map[image] !== thumb) {
+        map[image] = thumb
+        changed = true
+      }
+    }
+    if (changed)
+      root.thumbMap = map
+    return changed
+  }
+
+  function emitListed(items) {
     root.cachedListed = items
     root.cachedMode = root.listMode
     root.listed(items, root.listMode)
+  }
+
+  // Same cache as Ctrl+Super+Space (omarchy-menu-images): JPEG 1536x864.
+  readonly property string thumbScript: "cache=${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/image-selector; "
+    + "index=$cache/index.tsv; mkdir -p \"$cache\"; "
+    + "generate_thumbnail() { "
+    + "local image=\"$1\" thumbnail=\"$2\" lock=\"$2.lock\" tmp=\"$2.$$.jpg\" fd; "
+    + "exec 9>\"$lock\" || return; flock -w 30 9 || return; "
+    + "rm -f \"$thumbnail\".*.jpg; [[ -f $thumbnail ]] && return; "
+    + "if command -v vipsthumbnail >/dev/null 2>&1 && VIPS_CONCURRENCY=1 vipsthumbnail \"$image\" --size 1536x864 --smartcrop=centre --path \"$tmp[Q=82,strip]\"; then "
+    + "mv -f \"$tmp\" \"$thumbnail\"; else rm -f \"$tmp\"; fi; }; "
+    + "missing_img=(); missing_thumb=(); "
+    + "for image in \"$@\"; do "
+    + "[[ -f $image ]] || continue; "
+    + "signature=$(stat -Lc '%s:%Y' \"$image\" 2>/dev/null) || continue; "
+    + "hash=$(awk -F '\\t' -v path=\"$image\" -v sig=\"$signature\" '$1 == path && $2 == sig { print $3; exit }' \"$index\" 2>/dev/null); "
+    + "if [[ -z $hash ]]; then hash=$(printf '%s\\t%s' \"$image\" \"$signature\" | md5sum | cut -d ' ' -f 1); "
+    + "printf '%s\\t%s\\t%s\\n' \"$image\" \"$signature\" \"$hash\" >>\"$index\"; fi; "
+    + "thumb=$cache/$hash.jpg; "
+    + "if [[ -f $thumb ]]; then printf '%s\\t%s\\n' \"$image\" \"$thumb\"; "
+    + "else missing_img+=(\"$image\"); missing_thumb+=(\"$thumb\"); fi; "
+    + "done; "
+    + "if ((${#missing_img[@]})); then "
+    + "export -f generate_thumbnail; "
+    + "for i in \"${!missing_img[@]}\"; do printf '%s\\0%s\\0' \"${missing_img[$i]}\" \"${missing_thumb[$i]}\"; done | "
+    + "xargs -0 -n 2 -P \"$(nproc)\" bash -c 'generate_thumbnail \"$1\" \"$2\"' _; "
+    + "for i in \"${!missing_img[@]}\"; do "
+    + "if [[ -f ${missing_thumb[$i]} ]]; then printf '%s\\t%s\\n' \"${missing_img[$i]}\" \"${missing_thumb[$i]}\"; "
+    + "else printf '%s\\t%s\\n' \"${missing_img[$i]}\" \"${missing_img[$i]}\"; fi; "
+    + "done; fi"
+
+  function resolveThumbs(items) {
+    var list = items || []
+    root.thumbPending = list
+    root.thumbSerial = root.listSerial
+    if (!list.length)
+      return
+    var map = root.thumbMap || {}
+    var paths = []
+    var missing = false
+    for (var i = 0; i < list.length; i++) {
+      var p = String((list[i] && list[i].path) || "")
+      if (!p)
+        continue
+      paths.push(p)
+      if (!map[p])
+        missing = true
+    }
+    if (!paths.length || !missing)
+      return
+    if (thumbProc.running)
+      thumbProc.running = false
+    thumbProc.command = ["bash", "-c", root.thumbScript, "bg-thumbs"].concat(paths)
+    thumbProc.running = true
+  }
+
+  function warmThumbRows() {
+    if (rowsProc.running)
+      return
+    rowsProc.running = true
+  }
+
+  function applyThumbRows(text) {
+    root.mergeThumbMap(text)
+    var next = root.attachKnownThumbs(root.thumbPending)
+    for (var j = 0; j < next.length; j++) {
+      if (!next[j].thumbnail)
+        next[j].thumbnail = next[j].path
+    }
+    root.emitListed(next)
   }
 
   // --- Remove (mirrors remove/backgrounds.rs) ---
@@ -307,4 +437,32 @@ Item {
       root.onRemoveProcExited(exitCode)
     }
   }
+
+  Process {
+    id: thumbProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (root.thumbSerial !== root.listSerial)
+          return
+        root.applyThumbRows(text)
+      }
+    }
+  }
+
+  Process {
+    id: rowsProc
+    command: ["bash", "-c", "cat \"${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/image-selector\"/*.rows 2>/dev/null"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!root.mergeThumbMap(text))
+          return
+        if (root.cachedListed && root.cachedListed.length)
+          root.emitListed(root.attachKnownThumbs(root.cachedListed))
+      }
+    }
+  }
+
+  Component.onCompleted: root.warmThumbRows()
 }

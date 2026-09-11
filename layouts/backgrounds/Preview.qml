@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Shapes
-import Quickshell.Io
 import qs.Commons
 import "../../functions"
+import "../../functions/appearance"
 
 // Skewed coverflow for background images (listing only — mirrors PreviewTheme visuals).
 Item {
@@ -16,6 +16,7 @@ Item {
   property int selectedIndex: 0
   property bool layoutSettled: false
   property int pendingRemoveSerial: -1
+  property int pendingSelectIndex: -1
 
   property color dimColor: Color.background
   property color foreground: Color.imagePicker.text
@@ -48,12 +49,50 @@ Item {
   }
 
   function clear() {
+    Wallpaper.restore()
     root.backgrounds = []
     root.filterText = ""
     root.selectedIndex = 0
     root.pendingRemoveSerial = -1
-    if (applyProc.running)
-      applyProc.running = false
+    root.pendingSelectIndex = -1
+  }
+
+  function pathKey(list) {
+    var out = ""
+    var items = list || []
+    for (var i = 0; i < items.length; i++)
+      out += String((items[i] && items[i].path) || "") + "\n"
+    return out
+  }
+
+  function fileName(path) {
+    var p = String(path || "")
+    var slash = p.lastIndexOf("/")
+    return slash < 0 ? p : p.substring(slash + 1)
+  }
+
+  function indexForCurrentWallpaper(list) {
+    var current = Wallpaper.normalized(Wallpaper.persistedPath || Wallpaper.livePath)
+    var items = list || []
+    if (!current || !items.length)
+      return 0
+    var currentName = root.fileName(current)
+    var named = -1
+    var namedCount = 0
+    for (var i = 0; i < items.length; i++) {
+      var path = Wallpaper.normalized((items[i] && items[i].path) || "")
+      if (!path)
+        continue
+      if (path === current)
+        return i
+      if (currentName && root.fileName(path) === currentName) {
+        namedCount += 1
+        named = i
+      }
+    }
+    if (namedCount === 1)
+      return named
+    return 0
   }
 
   function loadFromData(items) {
@@ -64,9 +103,43 @@ Item {
       var path = root.jsonField(bg, "path")
       if (!path)
         continue
-      next.push({ path: path })
+      next.push({
+        path: path,
+        thumbnail: root.jsonField(bg, "thumbnail")
+      })
     }
+    var samePaths = root.pathKey(root.backgrounds) === root.pathKey(next)
     root.backgrounds = next
+    if (!samePaths) {
+      root.layoutSettled = false
+      if (root.pendingSelectIndex >= 0) {
+        var idx = root.pendingSelectIndex
+        if (next.length === 0)
+          idx = 0
+        else if (idx >= next.length)
+          idx = next.length - 1
+        root.selectedIndex = idx
+      } else {
+        root.selectedIndex = root.indexForCurrentWallpaper(next)
+      }
+      root.revealWhenSettled()
+    }
+    root.pendingSelectIndex = -1
+    if (next.length)
+      root.previewSelected()
+  }
+
+  function previewSelected() {
+    if (!root.visible)
+      return
+    if (!root.itemMatches(root.selectedIndex))
+      return
+    if (root.selectedIndex < 0 || root.selectedIndex >= imageArray.length)
+      return
+    var item = imageArray[root.selectedIndex]
+    var path = String((item && item.path) || "")
+    if (path)
+      Wallpaper.preview(path)
   }
 
   function applyBackground(background) {
@@ -75,10 +148,7 @@ Item {
     var path = String(background.path || background["path"] || "")
     if (!path)
       return
-    if (applyProc.running)
-      applyProc.running = false
-    applyProc.command = ["omarchy-theme-bg-set", path]
-    applyProc.running = true
+    Wallpaper.persist(path)
   }
 
   function removeBackground(background) {
@@ -100,10 +170,35 @@ Item {
     }
     var prev = root.selectedIndex
     root.backgrounds = next
+    var idx = 0
     if (next.length === 0)
-      root.selectedIndex = 0
+      idx = 0
     else if (prev >= next.length)
-      root.selectedIndex = next.length - 1
+      idx = next.length - 1
+    else
+      idx = prev
+    root.selectedIndex = idx
+    if (next.length && !root.itemMatches(idx)) {
+      var found = -1
+      for (var k = idx; k < next.length; k++) {
+        if (root.itemMatches(k)) {
+          found = k
+          break
+        }
+      }
+      if (found < 0) {
+        for (var m = idx - 1; m >= 0; m--) {
+          if (root.itemMatches(m)) {
+            found = m
+            break
+          }
+        }
+      }
+      if (found >= 0)
+        root.selectedIndex = found
+    }
+    root.pendingSelectIndex = root.selectedIndex
+    root.previewSelected()
   }
 
   Connections {
@@ -116,10 +211,6 @@ Item {
     }
   }
 
-  Process {
-    id: applyProc
-  }
-
   readonly property var imageArray: {
     var out = []
     var list = root.backgrounds || []
@@ -130,16 +221,17 @@ Item {
         continue
       out.push({
         path: path,
-        thumbnailPath: path
+        thumbnailPath: b.thumbnail || b["thumbnail"] || ""
       })
     }
     return out
   }
 
   onBackgroundsChanged: {
+    if ((root.backgrounds || []).length)
+      return
     root.layoutSettled = false
     root.selectedIndex = 0
-    root.revealWhenSettled()
   }
 
   function imageSource(path) {
@@ -202,6 +294,7 @@ Item {
       return
     root.selectedIndex = index
     root.indexChanged(index)
+    root.previewSelected()
   }
 
   function selectAdjacent(direction) {
@@ -269,9 +362,25 @@ Item {
   }
 
   Component.onCompleted: revealWhenSettled()
-  onVisibleChanged: if (visible) {
-    root.revealWhenSettled()
-    root.focusCarousel()
+  onVisibleChanged: {
+    if (visible) {
+      Wallpaper.begin()
+      root.previewSelected()
+      root.revealWhenSettled()
+      root.focusCarousel()
+    } else {
+      Wallpaper.restore()
+    }
+  }
+
+  function requestBack() {
+    Wallpaper.restore()
+    root.backRequested()
+  }
+
+  function requestDismiss() {
+    Wallpaper.restore()
+    root.dismissRequested()
   }
 
   Item {
@@ -300,7 +409,7 @@ Item {
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) {
-          root.dismissRequested()
+          root.requestDismiss()
           event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
           root.activateSelected()
@@ -312,7 +421,7 @@ Item {
           root.updateFilter(Util.editedFilter(event, root.filterText))
           event.accepted = true
         } else if (event.key === Qt.Key_Backspace) {
-          root.backRequested()
+          root.requestBack()
           event.accepted = true
         } else if (event.key === Qt.Key_Left || (event.key === Qt.Key_Tab && event.modifiers & Qt.ShiftModifier) || event.key === Qt.Key_Backtab) {
           root.selectAdjacent(-1)

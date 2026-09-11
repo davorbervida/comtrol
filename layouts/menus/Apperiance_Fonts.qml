@@ -4,7 +4,8 @@ import qs.Commons
 import qs.Ui
 import "../../functions/appearance"
 
-// Appearance → Fonts: Shell, Terminal, and GTK family + size.
+// Font family + size for Shell (in Appearance → Shell) and Desktop
+// (Appearance → Desktop → Fonts: Terminal + GTK).
 Item {
   id: root
 
@@ -17,13 +18,13 @@ Item {
   property color selectedText: Color.menu.selectedText
   property string fontFamily: Style.font.menuFamily
 
-  readonly property string itemId: "fonts"
-  readonly property string shellChangeId: "fonts.shell.change"
-  readonly property string terminalChangeId: "fonts.terminal.change"
-  readonly property string gtkChangeId: "fonts.gtk.change"
-  readonly property string shellSizeId: "fonts.shell.size"
-  readonly property string terminalSizeId: "fonts.terminal.size"
-  readonly property string gtkSizeId: "fonts.gtk.size"
+  readonly property string itemId: "desktop.fonts"
+  readonly property string shellChangeId: "shell.font.change"
+  readonly property string terminalChangeId: "desktop.fonts.terminal.change"
+  readonly property string gtkChangeId: "desktop.fonts.gtk.change"
+  readonly property string shellSizeId: "shell.font.size"
+  readonly property string terminalSizeId: "desktop.fonts.terminal.size"
+  readonly property string gtkSizeId: "desktop.fonts.gtk.size"
   readonly property string label: "Fonts"
   readonly property string icon: ""
   readonly property string title: "Fonts"
@@ -66,18 +67,21 @@ Item {
     kind: "menu"
   })
 
+  readonly property var shellRows: [
+    { itemId: "shell.sep.font", kind: "separator" },
+    {
+      itemId: root.shellChangeId,
+      label: (root.awaitingList && root.activeTarget === "shell") ? "Loading…" : "Font",
+      icon: root.icon,
+      kind: "menu",
+      status: Fonts.shellFamily || "—"
+    },
+    { itemId: root.shellSizeId, label: "Font size", kind: "slider" }
+  ]
+
   readonly property var menu: ({
     title: root.title,
     rows: [
-      {
-        itemId: root.shellChangeId,
-        label: (root.awaitingList && root.activeTarget === "shell") ? "Loading…" : "Shell",
-        icon: "󰨇",
-        kind: "menu",
-        status: Fonts.shellFamily || "—"
-      },
-      { itemId: root.shellSizeId, label: "Shell size", kind: "slider" },
-      { itemId: "fonts.sep.terminal", kind: "separator" },
       {
         itemId: root.terminalChangeId,
         label: (root.awaitingList && root.activeTarget === "terminal") ? "Loading…" : "Terminal",
@@ -86,7 +90,7 @@ Item {
         status: Fonts.terminalFamily || "—"
       },
       { itemId: root.terminalSizeId, label: "Terminal size", kind: "slider" },
-      { itemId: "fonts.sep.gtk", kind: "separator" },
+      { itemId: "desktop.fonts.sep.gtk", kind: "separator" },
       {
         itemId: root.gtkChangeId,
         label: (root.awaitingList && root.activeTarget === "gtk") ? "Loading…" : "GTK",
@@ -99,7 +103,7 @@ Item {
   })
 
   readonly property var changeMenu: ({
-    title: root.activeTarget === "terminal" ? "Terminal" : (root.activeTarget === "gtk" ? "GTK" : "Shell"),
+    title: root.activeTarget === "terminal" ? "Terminal" : (root.activeTarget === "gtk" ? "GTK" : "Font"),
     rows: root.fontRows
   })
 
@@ -112,9 +116,9 @@ Item {
 
   function targetFromId(itemId) {
     var id = String(itemId || "")
-    if (id.indexOf("fonts.terminal") === 0)
+    if (id.indexOf("desktop.fonts.terminal") === 0)
       return "terminal"
-    if (id.indexOf("fonts.gtk") === 0)
+    if (id.indexOf("desktop.fonts.gtk") === 0)
       return "gtk"
     return "shell"
   }
@@ -216,6 +220,15 @@ Item {
     return out
   }
 
+  function sliderDelegateFor(itemId) {
+    var id = String(itemId || "")
+    if (id === root.gtkSizeId)
+      return gtkSliderComponent
+    if (id === root.terminalSizeId)
+      return terminalSliderComponent
+    return sliderRowComponent
+  }
+
   Component.onCompleted: root.load()
 
   Connections {
@@ -228,78 +241,89 @@ Item {
     }
   }
 
-  Component {
-    id: sliderRowComponent
+  component FontSizeSliderRow: Item {
+    id: sliderRow
+    property bool hasCursor: false
+    property string target: "shell"
 
-    Item {
-      id: sliderRow
-      property bool hasCursor: false
-      property string target: "shell"
+    readonly property color ink: sliderRow.hasCursor ? root.selectedText : root.foreground
+    readonly property int currentValue: root.displayedSize(sliderRow.target)
 
-      readonly property color ink: sliderRow.hasCursor ? root.selectedText : root.foreground
-      readonly property int currentValue: root.displayedSize(sliderRow.target)
+    Column {
+      anchors.fill: parent
+      anchors.topMargin: Style.space(8)
+      anchors.bottomMargin: Style.space(8)
+      spacing: Style.space(6)
 
-      Column {
-        anchors.fill: parent
-        anchors.topMargin: Style.space(8)
-        anchors.bottomMargin: Style.space(8)
-        spacing: Style.space(6)
+      Item {
+        width: parent.width
+        height: Math.max(headerLabel.implicitHeight, sizeLabel.implicitHeight)
 
-        Item {
-          width: parent.width
-          height: Math.max(headerLabel.implicitHeight, sizeLabel.implicitHeight)
-
-          Text {
-            id: headerLabel
-            textFormat: Text.PlainText
-            text: {
-              if (sliderRow.target === "terminal")
-                return "TERMINAL"
-              if (sliderRow.target === "gtk")
-                return "GTK"
-              return "SHELL"
-            }
-            color: sliderRow.ink
-            opacity: 0.72
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
+        Text {
+          id: headerLabel
+          textFormat: Text.PlainText
+          text: {
+            if (sliderRow.target === "terminal")
+              return "TERMINAL"
+            if (sliderRow.target === "gtk")
+              return "GTK"
+            return "FONT"
           }
-
-          Text {
-            id: sizeLabel
-            textFormat: Text.PlainText
-            text: (sizeSlider.dragging ? Math.round(sizeSlider.liveValue) : sliderRow.currentValue)
-              + (sliderRow.target === "gtk" ? "pt" : "px")
-            color: sliderRow.ink
-            opacity: 0.72
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-          }
+          color: sliderRow.ink
+          opacity: 0.72
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
         }
 
-        PanelSlider {
-          id: sizeSlider
-          width: parent.width
-          minimum: root.minSize
-          maximum: root.maxSize
-          step: 1
-          integer: true
-          tickCount: root.maxSize - root.minSize + 1
-          value: sliderRow.currentValue
-          fillColor: sliderRow.ink
-          knobColor: sliderRow.ink
-          trackColor: Qt.rgba(sliderRow.ink.r, sliderRow.ink.g, sliderRow.ink.b, 0.22)
-          tickColor: root.background
-          onReleased: function(v) { root.setSize(sliderRow.target, Math.round(v)) }
+        Text {
+          id: sizeLabel
+          textFormat: Text.PlainText
+          text: (sizeSlider.dragging ? Math.round(sizeSlider.liveValue) : sliderRow.currentValue)
+            + (sliderRow.target === "gtk" ? "pt" : "px")
+          color: sliderRow.ink
+          opacity: 0.72
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
         }
       }
+
+      PanelSlider {
+        id: sizeSlider
+        width: parent.width
+        minimum: root.minSize
+        maximum: root.maxSize
+        step: 1
+        integer: true
+        tickCount: root.maxSize - root.minSize + 1
+        value: sliderRow.currentValue
+        fillColor: sliderRow.ink
+        knobColor: sliderRow.ink
+        trackColor: Qt.rgba(sliderRow.ink.r, sliderRow.ink.g, sliderRow.ink.b, 0.22)
+        tickColor: root.background
+        onReleased: function(v) { root.setSize(sliderRow.target, Math.round(v)) }
+      }
     }
+  }
+
+  Component {
+    id: sliderRowComponent
+    FontSizeSliderRow { target: "shell" }
+  }
+
+  Component {
+    id: terminalSliderComponent
+    FontSizeSliderRow { target: "terminal" }
+  }
+
+  Component {
+    id: gtkSliderComponent
+    FontSizeSliderRow { target: "gtk" }
   }
 
   readonly property Component sliderDelegate: sliderRowComponent

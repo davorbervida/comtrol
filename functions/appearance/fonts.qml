@@ -388,10 +388,14 @@ Item {
   }
 
   function load() {
+    var prevShell = root.shellFamily
+    var prevTerm = root.terminalFamily
+    var prevGtk = root.gtkFamily
     root.loadTerminal()
     root.loadShell()
     root.loadGtk()
-    root.changed()
+    if (root.shellFamily !== prevShell || root.terminalFamily !== prevTerm || root.gtkFamily !== prevGtk)
+      root.changed()
   }
 
   function setShellBaseSize(size) {
@@ -543,7 +547,6 @@ Item {
         return
       root.saveShellSize(next)
     }
-    root.changed()
   }
 
   Component.onCompleted: root.load()
@@ -579,11 +582,18 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var parsed = root.parseGtkFont(text)
-        if (parsed.family)
+        var familyChanged = false
+        if (parsed.family && parsed.family !== root.gtkFamily) {
           root.gtkFamily = parsed.family
-        if (parsed.size > 0)
-          root.gtkSize = root.clamp(parsed.size)
-        root.changed()
+          familyChanged = true
+        }
+        if (parsed.size > 0) {
+          var n = root.clamp(parsed.size)
+          if (n !== root.gtkSize)
+            root.gtkSize = n
+        }
+        if (familyChanged)
+          root.changed()
       }
     }
   }

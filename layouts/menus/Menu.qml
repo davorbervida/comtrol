@@ -66,19 +66,23 @@ Item {
   readonly property bool menuSearchActive: !showingResults && filterText.trim().length > 0
   readonly property bool applicationsMenuActive: !showingResults && activeMenu === "applications"
   readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive || applicationsMenuActive) ? detailRowHeight : rowHeight
-  readonly property bool fontsMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceFonts.itemId
+  readonly property bool shellMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceShell.itemId
+  readonly property bool desktopFontsMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceFonts.itemId
   readonly property bool desktopMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceDesktop.itemId
   readonly property bool desktopOpacityGroupActive: !showingResults && filterText.trim().length === 0
     && appearanceDesktop.isOpacityGroupMenu(activeMenu)
   readonly property int visibleRowsHeight: {
     var available = Math.max(activeRowHeight, parent.height - Style.gapsOut * 2 - headerHeight - contentSpacing - contentMargin * 2)
     var h
-    if (root.fontsMenuActive)
-      h = 3 * rowHeight + 3 * appearanceFonts.sliderRowHeight
-        + 2 * appearanceFonts.separatorRowHeight + 7 * rowSpacing
+    if (root.shellMenuActive)
+      h = 3 * rowHeight + appearanceFonts.sliderRowHeight
+        + appearanceFonts.separatorRowHeight + 4 * rowSpacing
+    else if (root.desktopFontsMenuActive)
+      h = 2 * rowHeight + 2 * appearanceFonts.sliderRowHeight
+        + appearanceFonts.separatorRowHeight + 4 * rowSpacing
     else if (root.desktopMenuActive)
-      h = 4 * rowHeight + 5 * appearanceDesktop.sliderRowHeight
-        + 3 * appearanceDesktop.separatorRowHeight + 11 * rowSpacing
+      h = 3 * rowHeight + 5 * appearanceDesktop.sliderRowHeight
+        + 3 * appearanceDesktop.separatorRowHeight + 10 * rowSpacing
     else if (root.desktopOpacityGroupActive)
       h = 2 * appearanceDesktop.sliderRowHeight + rowSpacing
     else
@@ -161,7 +165,21 @@ Item {
         root.selectedIndex = appearanceFonts.currentIndex
         return
       }
-      if (root.activeMenu === appearanceFonts.itemId)
+      if (root.activeMenu === appearanceFonts.itemId
+          || root.activeMenu === appearanceShell.itemId)
+        root.rebuildDisplay()
+    }
+  }
+
+  Apperiance_Shell {
+    id: appearanceShell
+    background: root.background
+    foreground: root.foreground
+    selectedText: root.selectedText
+    fontFamily: root.fontFamily
+    onChanged: {
+      if (root.activeMenu === appearanceShell.itemId
+          || root.activeMenu === appearanceShell.positionItemId)
         root.rebuildDisplay()
     }
   }
@@ -174,7 +192,6 @@ Item {
     fontFamily: root.fontFamily
     onChanged: {
       if (root.activeMenu === appearanceDesktop.itemId
-          || root.activeMenu === appearanceDesktop.positionItemId
           || root.activeMenu === appearanceDesktop.opacityItemId
           || appearanceDesktop.isOpacityGroupMenu(root.activeMenu))
         root.rebuildDisplay()
@@ -201,7 +218,7 @@ Item {
           { itemId: "themes", label: "Themes", icon: "󰏘", kind: "action", domain: "themes", mode: "local" },
           { itemId: "background", label: "Backgrounds", icon: "󰸉", kind: "menu" },
           { itemId: "boot", label: "Unlock", icon: "󰟵", kind: "action", domain: "boot", mode: "local" },
-          appearanceFonts.rootRow,
+          appearanceShell.rootRow,
           appearanceDesktop.rootRow
         ]
       },
@@ -265,12 +282,16 @@ Item {
     tree[defaultsMenu.terminalItemId] = defaultsMenu.terminalMenu
     tree[defaultsMenu.editorItemId] = defaultsMenu.editorMenu
     tree[defaultsMenu.agentItemId] = defaultsMenu.agentMenu
+    tree[appearanceShell.itemId] = {
+      title: appearanceShell.menu.title,
+      rows: (appearanceShell.menu.rows || []).concat(appearanceFonts.shellRows)
+    }
+    tree[appearanceShell.positionItemId] = appearanceShell.positionMenu
+    tree[appearanceDesktop.itemId] = appearanceDesktop.menu
     tree[appearanceFonts.itemId] = appearanceFonts.menu
     var fontMenus = appearanceFonts.groupMenus()
     for (var fontKey in fontMenus)
       tree[fontKey] = fontMenus[fontKey]
-    tree[appearanceDesktop.itemId] = appearanceDesktop.menu
-    tree[appearanceDesktop.positionItemId] = appearanceDesktop.positionMenu
     var opacityMenus = appearanceDesktop.opacityGroupMenus()
     for (var opacityKey in opacityMenus)
       tree[opacityKey] = opacityMenus[opacityKey]
@@ -467,7 +488,8 @@ Item {
       return
     }
     appearanceFonts.awaitingList = true
-    if (root.activeMenu === appearanceFonts.itemId)
+    if (root.activeMenu === appearanceFonts.itemId
+        || root.activeMenu === appearanceShell.itemId)
       root.rebuildDisplay()
   }
 
@@ -814,7 +836,7 @@ Item {
       root.filterText = ""
       root.selectedIndex = 0
       root.cursorActive = true
-      if (row.itemId === appearanceFonts.itemId)
+      if (row.itemId === appearanceShell.itemId || row.itemId === appearanceFonts.itemId)
         appearanceFonts.load()
       if (row.itemId === "applications") {
         root.refreshLocalIcons()
@@ -844,7 +866,7 @@ Item {
       return
     }
     if (row.kind === "bar-transparency") {
-      appearanceDesktop.toggleTransparency()
+      appearanceShell.toggleTransparency()
       return
     }
     if (row.kind === "look-shadow") {
@@ -856,7 +878,7 @@ Item {
       return
     }
     if (row.kind === "bar-position") {
-      appearanceDesktop.setPosition(row.itemId)
+      appearanceShell.setPosition(row.itemId)
       return
     }
     if (row.kind === "power") {
@@ -1144,7 +1166,7 @@ Item {
           clip: true
           spacing: root.rowSpacing
           boundsBehavior: Flickable.StopAtBounds
-          interactive: !root.isSliderSelected() && !root.fontsMenuActive && !root.desktopMenuActive && !root.desktopOpacityGroupActive
+          interactive: !root.isSliderSelected() && !root.shellMenuActive && !root.desktopFontsMenuActive && !root.desktopMenuActive && !root.desktopOpacityGroupActive
 
           delegate: BorderSurface {
             id: row
@@ -1264,7 +1286,7 @@ Item {
                   width: parent.width
                   text: row.label
                   color: row.hasCursor ? root.selectedText : root.foreground
-                  font.family: root.fontFamily
+                  font.family: row.kind === "font" ? row.label : root.fontFamily
                   font.pixelSize: root.menuFontBody
                   elide: Text.ElideRight
                 }
@@ -1366,7 +1388,7 @@ Item {
               active: row.isSlider
               sourceComponent: appearanceDesktop.isDesktopSlider(row.itemId)
                 ? appearanceDesktop.sliderDelegate
-                : appearanceFonts.sliderDelegate
+                : appearanceFonts.sliderDelegateFor(row.itemId)
               onLoaded: {
                 if (!item)
                   return
@@ -1374,8 +1396,6 @@ Item {
                 if (appearanceDesktop.isDesktopSlider(row.itemId)) {
                   item.role = appearanceDesktop.sliderRoleFor(row.itemId)
                   item.groupId = appearanceDesktop.sliderGroupFor(row.itemId)
-                } else if (appearanceFonts.isSizeSlider(row.itemId)) {
-                  item.target = appearanceFonts.targetFromId(row.itemId)
                 }
               }
             }
