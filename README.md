@@ -75,7 +75,7 @@ omarchy plugin update com.github.davorbervida.comtrol
 
 ### Appearance
 - **Themes** — browse and apply installed Omarchy themes
-- **Backgrounds** — current theme, all themes, my wallpapers, all wallpapers
+- **Backgrounds** — current theme, all themes, my wallpapers
 - **Unlock** — boot/unlock screen backgrounds
 - **Fonts** — change UI font and text size
 - **Desktop** — bar/desktop look: blur, shadows, opacity groups, position

@@ -4,6 +4,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../../functions"
+import "../../functions/appearance"
 
 // Card menu: navigation tree, desktop apps, and list results (packages/AUR/etc.).
 Item {
@@ -38,12 +39,12 @@ Item {
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color border: Color.menu.border
-  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
+  property var borderSpec: ShellLook.menuBorderSpec
   property color selectedBorder: Color.menu.selectedBorder
-  property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", selectedBorder, 0)
+  property var selectedBorderSpec: ShellLook.menuSelectedBorderSpec
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
-  readonly property int cornerRadius: Style.cornerRadius
+  readonly property int cornerRadius: appearanceShell.displayedMenuRounding
   property string fontFamily: Style.font.menuFamily
   // Slightly larger type than the shared shell scale for menu readability.
   readonly property real menuFontScale: 1.25
@@ -67,6 +68,10 @@ Item {
   readonly property bool applicationsMenuActive: !showingResults && activeMenu === "applications"
   readonly property int activeRowHeight: (resultsHaveDetail || menuSearchActive || applicationsMenuActive) ? detailRowHeight : rowHeight
   readonly property bool shellMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceShell.itemId
+  readonly property bool shellNestedMenuActive: !showingResults && filterText.trim().length === 0
+    && appearanceShell.isNestedMenu(activeMenu)
+  readonly property string shellEditGroup: appearanceShell.editGroup(root.activeMenu)
+  readonly property string shellEditState: appearanceShell.editState(root.activeMenu)
   readonly property bool desktopFontsMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceFonts.itemId
   readonly property bool desktopMenuActive: !showingResults && filterText.trim().length === 0 && activeMenu === appearanceDesktop.itemId
   readonly property bool desktopOpacityGroupActive: !showingResults && filterText.trim().length === 0
@@ -74,9 +79,8 @@ Item {
   readonly property int visibleRowsHeight: {
     var available = Math.max(activeRowHeight, parent.height - Style.gapsOut * 2 - headerHeight - contentSpacing - contentMargin * 2)
     var h
-    if (root.shellMenuActive)
-      h = 3 * rowHeight + appearanceFonts.sliderRowHeight
-        + appearanceFonts.separatorRowHeight + 4 * rowSpacing
+    if (root.shellMenuActive || root.shellNestedMenuActive)
+      h = root.menuRowsHeight()
     else if (root.desktopFontsMenuActive)
       h = 2 * rowHeight + 2 * appearanceFonts.sliderRowHeight
         + appearanceFonts.separatorRowHeight + 4 * rowSpacing
@@ -173,13 +177,14 @@ Item {
 
   Apperiance_Shell {
     id: appearanceShell
+    host: root.shell
     background: root.background
     foreground: root.foreground
     selectedText: root.selectedText
     fontFamily: root.fontFamily
     onChanged: {
       if (root.activeMenu === appearanceShell.itemId
-          || root.activeMenu === appearanceShell.positionItemId)
+          || appearanceShell.isNestedMenu(root.activeMenu))
         root.rebuildDisplay()
     }
   }
@@ -227,8 +232,7 @@ Item {
         rows: [
           { itemId: "background.theme", label: "Theme", icon: "󰏘", kind: "action", domain: "background", mode: "current" },
           { itemId: "background.themes", label: "All themes", icon: "󰕰", kind: "action", domain: "background", mode: "themes" },
-          { itemId: "background.wallpapers", label: "My wallpapers", icon: "󰋩", kind: "action", domain: "background", mode: "wallpapers" },
-          { itemId: "background.all", label: "All wallpapers", icon: "󰸉", kind: "action", domain: "background", mode: "all" }
+          { itemId: "background.wallpapers", label: "My wallpapers", icon: "󰋩", kind: "action", domain: "background", mode: "wallpapers" }
         ]
       },
       "apps": {
@@ -286,7 +290,9 @@ Item {
       title: appearanceShell.menu.title,
       rows: (appearanceShell.menu.rows || []).concat(appearanceFonts.shellRows)
     }
-    tree[appearanceShell.positionItemId] = appearanceShell.positionMenu
+    var shellMenus = appearanceShell.nestedMenus()
+    for (var shellKey in shellMenus)
+      tree[shellKey] = shellMenus[shellKey]
     tree[appearanceDesktop.itemId] = appearanceDesktop.menu
     tree[appearanceFonts.itemId] = appearanceFonts.menu
     var fontMenus = appearanceFonts.groupMenus()
@@ -307,6 +313,7 @@ Item {
   onShowingResultsChanged: root.rebuildDisplay()
   onResultRowsChanged: root.rebuildDisplay()
   onLoadingChanged: root.rebuildDisplay()
+  onActiveMenuChanged: appearanceShell.syncPreview(root.activeMenu)
 
   function open(payload) {
     var data = payload || ({})
@@ -318,9 +325,15 @@ Item {
     root.pendingActionDomain = ""
     root.pendingActionMode = ""
     root.rebuildDisplay()
+    root.syncWebBrowser()
     root.refreshLocalIcons()
     if (root.appLibrary)
       root.appLibrary.refreshIcons()
+    appearanceShell.syncPreview(root.activeMenu)
+  }
+
+  function clearShellPreview() {
+    appearanceShell.syncPreview("")
   }
 
   function focusMenu() {
@@ -390,6 +403,7 @@ Item {
     root.cursorActive = true
     root.rebuildDisplay()
     root.syncWebBrowser()
+    appearanceShell.syncPreview(root.activeMenu)
     return true
   }
 
@@ -405,6 +419,19 @@ Item {
     if (kind === "separator")
       return appearanceDesktop.separatorRowHeight
     return root.activeRowHeight
+  }
+
+  function menuRowsHeight() {
+    var n = displayModel.count
+    if (n <= 0)
+      return root.activeRowHeight
+    var h = 0
+    for (var i = 0; i < n; i++) {
+      if (i)
+        h += root.rowSpacing
+      h += root.rowHeightForKind(String(displayModel.get(i).kind || ""))
+    }
+    return h
   }
 
   function isSliderSelected() {
@@ -426,6 +453,8 @@ Item {
         || appearanceDesktop.isLookSlider(id)
         || appearanceDesktop.groupIdFromSlider(id))
       appearanceDesktop.adjustSlider(id, delta)
+    else if (appearanceShell.isShellSlider(id))
+      appearanceShell.adjustSlider(id, delta)
     else if (appearanceFonts.isSizeSlider(id))
       appearanceFonts.adjustSize(id, delta)
   }
@@ -838,6 +867,8 @@ Item {
       root.cursorActive = true
       if (row.itemId === appearanceShell.itemId || row.itemId === appearanceFonts.itemId)
         appearanceFonts.load()
+      if (row.itemId === appearanceShell.itemId)
+        appearanceShell.loadLook()
       if (row.itemId === "applications") {
         root.refreshLocalIcons()
         if (root.appLibrary)
@@ -1166,7 +1197,7 @@ Item {
           clip: true
           spacing: root.rowSpacing
           boundsBehavior: Flickable.StopAtBounds
-          interactive: !root.isSliderSelected() && !root.shellMenuActive && !root.desktopFontsMenuActive && !root.desktopMenuActive && !root.desktopOpacityGroupActive
+          interactive: !root.isSliderSelected() && !root.desktopFontsMenuActive && !root.desktopMenuActive && !root.desktopOpacityGroupActive
 
           delegate: BorderSurface {
             id: row
@@ -1188,6 +1219,32 @@ Item {
             readonly property bool isSlider: row.kind === "slider"
             readonly property bool isSeparator: row.kind === "separator"
             readonly property bool hasCursor: !row.isSeparator && root.cursorActive && index === root.selectedIndex
+            readonly property bool pointerHot: {
+              if (row.isSeparator)
+                return false
+              if (row.isSlider)
+                return sliderHover.hovered
+              return rowMouse.containsMouse
+            }
+            readonly property bool isPressed: !row.isSeparator && !row.isSlider && rowMouse.pressed
+            readonly property string lookState: {
+              void ShellLook.shellEpoch
+              if (row.isSeparator)
+                return "idle"
+              if (row.hasCursor && root.shellEditGroup === "menu" && root.shellEditState)
+                return root.shellEditState
+              if (row.isPressed)
+                return "pressed"
+              var hot = row.pointerHot
+              if (row.hasCursor && hot)
+                return "selected"
+              if (row.hasCursor && root.suppressPointerSelect)
+                return "focus"
+              if (hot || (row.hasCursor && !root.suppressPointerSelect))
+                return "hover"
+              return "idle"
+            }
+            readonly property color ink: row.lookState === "idle" ? root.foreground : root.selectedText
             readonly property bool hasDetail: detail.length > 0
             readonly property bool isApp: row.kind === "app"
             readonly property bool showPackageRemove: row.kind === "result"
@@ -1216,8 +1273,8 @@ Item {
             width: ListView.view.width
             height: root.rowHeightForKind(row.kind)
             radius: root.cornerRadius
-            color: (row.isSeparator || !hasCursor) ? "transparent" : root.selectedBackground
-            borderSpec: (row.isSeparator || !hasCursor) ? Border.none() : root.selectedBorderSpec
+            color: row.isSeparator ? "transparent" : ShellLook.stateFillColor("menu", row.lookState)
+            borderSpec: row.isSeparator ? Border.none() : ShellLook.rowBorderSpec("menu", row.lookState)
 
             Row {
               visible: !row.isSlider && !row.isSeparator
@@ -1238,7 +1295,7 @@ Item {
                   anchors.centerIn: parent
                   visible: !row.isApp && !row.showResultIconImage
                   text: row.icon
-                  color: row.hasCursor ? root.selectedText : root.foreground
+                  color: row.ink
                   font.family: root.fontFamily
                   font.pixelSize: root.menuFontIcon
                 }
@@ -1266,7 +1323,7 @@ Item {
                   anchors.centerIn: parent
                   visible: (row.isApp || row.showResultIconImage) && appIconImage.status !== Image.Ready
                   text: row.label ? String(row.label).charAt(0).toUpperCase() : "?"
-                  color: row.hasCursor ? root.selectedText : root.foreground
+                  color: row.ink
                   font.family: root.fontFamily
                   font.pixelSize: root.menuFontBody
                   font.bold: true
@@ -1285,7 +1342,7 @@ Item {
                   textFormat: Text.PlainText
                   width: parent.width
                   text: row.label
-                  color: row.hasCursor ? root.selectedText : root.foreground
+                  color: row.ink
                   font.family: row.kind === "font" ? row.label : root.fontFamily
                   font.pixelSize: root.menuFontBody
                   elide: Text.ElideRight
@@ -1296,7 +1353,7 @@ Item {
                   width: parent.width
                   visible: row.hasDetail
                   text: row.detail
-                  color: row.hasCursor ? root.selectedText : root.foreground
+                  color: row.ink
                   opacity: 0.62
                   font.family: root.fontFamily
                   font.pixelSize: root.menuFontCaption
@@ -1313,7 +1370,7 @@ Item {
                   anchors.fill: parent
                   visible: !row.showPackageRemove && !row.showPluginToggle && !row.hasStatus
                   text: (row.kind === "menu" || row.kind === "action") ? "›" : ""
-                  color: row.hasCursor ? root.selectedText : root.foreground
+                  color: row.ink
                   opacity: (row.kind === "menu" || row.kind === "action") ? 0.36 : 0
                   font.family: root.fontFamily
                   font.pixelSize: root.menuFontBody
@@ -1326,7 +1383,7 @@ Item {
                   anchors.fill: parent
                   visible: !row.showPackageRemove && !row.showPluginToggle && row.hasStatus
                   text: row.status
-                  color: row.hasCursor ? root.selectedText : root.foreground
+                  color: row.ink
                   opacity: 0.72
                   font.family: root.fontFamily
                   font.pixelSize: root.menuFontCaption
@@ -1346,7 +1403,7 @@ Item {
                     width: row.removeWidth
                     height: parent.height
                     text: "Remove"
-                    color: row.hasCursor ? root.selectedText : root.foreground
+                    color: row.ink
                     opacity: 0.72
                     font.family: root.fontFamily
                     font.pixelSize: root.menuFontCaption
@@ -1360,7 +1417,7 @@ Item {
                     width: row.toggleWidth
                     height: parent.height
                     text: row.pluginIsEnabled ? "Disable" : "Enable"
-                    color: row.hasCursor ? root.selectedText : root.foreground
+                    color: row.ink
                     opacity: 0.72
                     font.family: root.fontFamily
                     font.pixelSize: root.menuFontCaption
@@ -1388,7 +1445,9 @@ Item {
               active: row.isSlider
               sourceComponent: appearanceDesktop.isDesktopSlider(row.itemId)
                 ? appearanceDesktop.sliderDelegate
-                : appearanceFonts.sliderDelegateFor(row.itemId)
+                : (appearanceShell.isShellSlider(row.itemId)
+                  ? appearanceShell.sliderDelegate
+                  : appearanceFonts.sliderDelegateFor(row.itemId))
               onLoaded: {
                 if (!item)
                   return
@@ -1396,16 +1455,22 @@ Item {
                 if (appearanceDesktop.isDesktopSlider(row.itemId)) {
                   item.role = appearanceDesktop.sliderRoleFor(row.itemId)
                   item.groupId = appearanceDesktop.sliderGroupFor(row.itemId)
+                } else if (appearanceShell.isShellSlider(row.itemId)) {
+                  item.role = appearanceShell.sliderRoleFor(row.itemId)
+                  item.groupId = appearanceShell.sliderGroupFor(row.itemId)
+                  item.channel = appearanceShell.sliderChannelFor(row.itemId)
                 }
               }
             }
 
             HoverHandler {
+              id: sliderHover
               enabled: row.isSlider
               onHoveredChanged: if (hovered) root.pointerSelect(index)
             }
 
             MouseArea {
+              id: rowMouse
               anchors.fill: parent
               visible: !row.isSlider && !row.isSeparator
               enabled: !row.isSlider && !row.isSeparator

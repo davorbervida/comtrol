@@ -245,12 +245,14 @@ Item {
   function close() {
     previewBackground.clear()
     WebBrowser.cool()
+    cardMenu.clearShellPreview()
     root.opened = false
   }
 
   function dismiss() {
     previewBackground.clear()
     WebBrowser.cool()
+    cardMenu.clearShellPreview()
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide((root.manifest && root.manifest.id) || "comtrol")

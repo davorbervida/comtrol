@@ -29,7 +29,7 @@ Item {
   property string scanMode: "" // "" | "listing"
   property string scanRole: "" // themes_root | images
   property string scanListingPath: ""
-  property string listMode: "" // current | themes | wallpapers | all
+  property string listMode: "" // current | themes | wallpapers
   property int thumbSerial: 0
   property var thumbPending: []
   property var thumbMap: ({})
@@ -98,7 +98,7 @@ Item {
 
   function list(mode) {
     var m = String(mode || "current").trim().toLowerCase()
-    if (m !== "current" && m !== "themes" && m !== "wallpapers" && m !== "all")
+    if (m !== "current" && m !== "themes" && m !== "wallpapers")
       m = "current"
 
     root.listSerial += 1
@@ -127,12 +127,7 @@ Item {
         { path: root.firstPartyThemesDir, role: "themes_root" }
       ]
     }
-    // all = theme backgrounds then wallpapers
-    return [
-      { path: root.userThemesDir, role: "themes_root" },
-      { path: root.firstPartyThemesDir, role: "themes_root" },
-      { path: root.wallpapersDir, role: "images" }
-    ]
+    return [{ path: root.currentBackgroundsDir, role: "images" }]
   }
 
   function drainScanQueue() {

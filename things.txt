@@ -1,0 +1,28 @@
+ Look (isti “slider / po kategoriji” obrazac)
+
+  To živi u ~/.config/omarchy/shell.toml i pobjeđuje temu, pa preživljava omarchy theme set.
+
+  • Opacity / alpha po površini — background-alpha, scrim-alpha, border-alpha za menu, popups, notifications, lock, bar… Desktop već ima Opacity; ovo je shell analog.
+  • Debljina bara — [bar] size-horizontal / size-vertical (visina top/bottom, širina left/right).
+  • Spacing — [spacing] scale (sve margine/padding odjednom) ili pojedinačni tokeni (panel-padding, control-height, popup-padding…).
+  • Fill / hover / selected na kontrolama — [controls] *-fill-alpha, *-border-alpha, boja stanja. To je “koliko je gumb pun” a ne debljina okvira.
+  • Per-side border — border-width-top/right/bottom/left (npr. samo donja crta na baru).
+  • Selected row na meniju — selected-background-alpha, selected-border-width (kursor vs. kartica).
+  • Image picker — zasebna površina (scrim, selected/unselected border); nije u tvom Border izborniku.
+  • Font skala po tokenu — pored base-size, možeš pinati samo heading, caption, icon-large…
+
+  Layout i ponašanje (shell.json)
+
+  • Widgeti na baru — redoslijed left/center/right, omarchy bar move/put/set. Npr. format sata: omarchy bar set omarchy.clock format HH:mm.
+  • Idle — idle.screensaver i idle.lock (sekunde). To je već u json-u (150 / 300).
+  • Plugini — enable/disable/clone; cloneani widget (omarchy plugin clone omarchy.workspaces) je pravi način za custom izgled workspacesa.
+
+  Boje
+
+  Boje (background, text, border, gradienti hyprland.active-border) dolaze iz teme (shell.toml teme / colors.toml). User override u ~/.config/omarchy/shell.toml radi, ali to je bliže “forkaj temu” nego
+  slajderu. Themes u cOMtrolu to već pokrivaju na drugoj razini.
+
+  Što shell ne drži (to je Desktop)
+
+  Blur, window gaps, window border/rounding, shadow, opacity prozora — Hyprland, već pod Appearance → Desktop. Style.gapsOut (udaljenost bara/notifikacija od ruba ekrana) prati Hyprland gaps_out / 2, nema
+  zasebnog shell ključa.
